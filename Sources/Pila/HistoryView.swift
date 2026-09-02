@@ -197,7 +197,7 @@ struct HistoryView: View {
                     .foregroundStyle(.orange)
                     .font(.footnote)
             }
-            Text(self.model.stats())
+            Text(self.model.statsText)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

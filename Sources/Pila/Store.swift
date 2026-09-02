@@ -276,6 +276,21 @@ final class Store {
         }
     }
 
+    /// Loaded once so the ingestor can filter in memory instead of asking per entry, per cycle.
+    func externalIDs() -> Set<String> {
+        self.queue.sync {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(self.db, "SELECT external_id FROM items WHERE external_id IS NOT NULL;", -1, &statement, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(statement) }
+
+            var ids: Set<String> = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if let raw = sqlite3_column_text(statement, 0) { ids.insert(String(cString: raw)) }
+            }
+            return ids
+        }
+    }
+
     func hasExternalID(_ externalID: String) -> Bool {
         self.queue.sync {
             var statement: OpaquePointer?

@@ -69,6 +69,10 @@ final class NotchController {
     private var surfaces: [Surface] = []
     private var collapseTask: Task<Void, Never>?
     private var expandTask: Task<Void, Never>?
+    private var peekTask: Task<Void, Never>?
+    /// Seeded on first sample so launching the app does not fire a peek for whatever was already on.
+    private var lastTrackKey: String?
+    private var lastCharging: Bool?
     private var cancellables = Set<AnyCancellable>()
 
     private let media: MediaController
@@ -94,12 +98,64 @@ final class NotchController {
             .sink { [weak self] _ in self?.rebuild() }
             .store(in: &self.cancellables)
 
+        self.observePeeks()
+
         self.state.$expanded
             .receive(on: RunLoop.main)
             .sink { [weak self] expanded in
                 for surface in self?.surfaces ?? [] { surface.hover.expanded = expanded }
             }
             .store(in: &self.cancellables)
+    }
+
+    /// A peek is the notch talking first: a new song, the charger going in or out.
+    private func observePeeks() {
+        self.media.$track
+            .receive(on: RunLoop.main)
+            .sink { [weak self] track in
+                guard let self, let track else { return }
+                let key = "\(track.title)|\(track.artist)"
+                defer { self.lastTrackKey = key }
+
+                // First sample only seeds the baseline; announcing it would fire on every launch.
+                guard let previous = self.lastTrackKey, previous != key, track.isPlaying else { return }
+                self.peek(NotchState.Peek(
+                    title: track.title,
+                    subtitle: track.artist,
+                    symbol: "music.note",
+                    usesArtwork: true
+                ))
+            }
+            .store(in: &self.cancellables)
+
+        self.battery.$state
+            .receive(on: RunLoop.main)
+            .sink { [weak self] battery in
+                guard let self, let battery else { return }
+                defer { self.lastCharging = battery.isCharging }
+
+                guard let previous = self.lastCharging, previous != battery.isCharging else { return }
+                self.peek(NotchState.Peek(
+                    title: battery.isCharging ? "Cargando" : "Sin cargador",
+                    subtitle: "\(battery.percent)%" + (battery.detail.map { " · \($0)" } ?? ""),
+                    symbol: battery.symbol,
+                    usesArtwork: false
+                ))
+            }
+            .store(in: &self.cancellables)
+    }
+
+    private func peek(_ peek: NotchState.Peek) {
+        // Hovering wins: never yank the panel out from under a pointer that is already using it.
+        guard !self.state.expanded else { return }
+
+        self.peekTask?.cancel()
+        self.state.peek = peek
+        self.peekTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(2600))
+            guard !Task.isCancelled else { return }
+            self?.state.peek = nil
+        }
     }
 
     private func rebuild() {
@@ -179,6 +235,8 @@ final class NotchController {
             guard !Task.isCancelled, let self else { return }
             self.expandTask = nil
             guard self.pointerIsOverAnyNotch() else { return }
+            self.peekTask?.cancel()
+            self.state.peek = nil
             self.state.expanded = true
         }
     }

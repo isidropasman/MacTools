@@ -48,8 +48,8 @@ struct NotchView: View {
     /// Radii grow with the panel: tight like the real cutout when closed, wide when open.
     private var shape: NotchShape {
         NotchShape(
-            topRadius: self.expanded ? 19 : 6,
-            bottomRadius: self.expanded ? 24 : 14
+            topRadius: self.state.isOpen ? 19 : 6,
+            bottomRadius: self.state.isOpen ? 24 : 14
         )
     }
 
@@ -64,16 +64,23 @@ struct NotchView: View {
                     .frame(width: NotchState.windowWidth, height: self.state.contentHeight, alignment: .top)
                     .opacity(self.expanded ? 1 : 0)
                     .animation(.easeOut(duration: 0.18).delay(self.expanded ? 0.08 : 0), value: self.expanded)
+
+                if let peek = state.peek, !self.expanded {
+                    self.peekStrip(peek)
+                        .frame(width: NotchState.windowWidth, height: NotchState.peekHeight, alignment: .top)
+                        .transition(.opacity)
+                }
             }
             .frame(
-                width: self.expanded ? NotchState.windowWidth : self.notchWidth,
-                height: self.expanded ? self.state.contentHeight : self.notchHeight,
+                width: self.state.isOpen ? NotchState.windowWidth : self.notchWidth,
+                height: self.state.isOpen ? self.state.currentHeight : self.notchHeight,
                 alignment: .top
             )
             .clipShape(self.shape)
-            .overlay(self.shape.stroke(.white.opacity(self.expanded ? (self.dropActive ? 0.5 : 0.10) : 0), lineWidth: 1))
+            .overlay(self.shape.stroke(.white.opacity(self.state.isOpen ? (self.dropActive ? 0.5 : 0.10) : 0), lineWidth: 1))
             // The window never resizes; this is the only thing that moves.
             .animation(.spring(response: 0.38, dampingFraction: 0.78), value: self.expanded)
+            .animation(.spring(response: 0.34, dampingFraction: 0.8), value: self.state.peek)
             .animation(.spring(response: 0.3, dampingFraction: 0.85), value: self.state.tab)
 
             Spacer(minLength: 0)
@@ -113,6 +120,44 @@ struct NotchView: View {
                 self.onDropTargeted(active)
             }
         )
+    }
+
+    /// Deliberately not the full panel: a peek is a glance, so it shows one line and leaves.
+    private func peekStrip(_ peek: NotchState.Peek) -> some View {
+        HStack(spacing: 0) {
+            Group {
+                if peek.usesArtwork, let artwork = media.artwork {
+                    Image(nsImage: artwork)
+                        .resizable()
+                        .frame(width: 26, height: 26)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                } else {
+                    Image(systemName: peek.symbol)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 26, height: 26)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.trailing, 12)
+
+            Color.clear.frame(width: self.notchWidth)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(peek.title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                Text(peek.subtitle)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, 12)
+        }
+        .foregroundStyle(.white)
+        .padding(.top, self.notchHeight + 4)
+        .padding(.horizontal, 34)
     }
 
     // MARK: - Ears
@@ -368,6 +413,9 @@ struct NotchView: View {
                                     }
                                 }
                                 Spacer(minLength: 0)
+                                if let meeting = event.meeting {
+                                    self.joinButton(meeting, prominent: event.isJoinable)
+                                }
                                 if event.isNow {
                                     Text("ahora")
                                         .font(.system(size: 9, weight: .semibold))
@@ -394,6 +442,26 @@ struct NotchView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    /// Filled while the meeting is about to start or already running, outlined otherwise, so the
+    /// one you are late for reads differently from the one at six.
+    private func joinButton(_ meeting: MeetingLink.Match, prominent: Bool) -> some View {
+        Button {
+            NSWorkspace.shared.open(meeting.url)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "video.fill").font(.system(size: 9))
+                Text("Unirse").font(.system(size: 10, weight: .medium))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(prominent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.white.opacity(0.12))))
+            .foregroundStyle(.white.opacity(prominent ? 1 : 0.7))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Abrir \(meeting.provider)")
     }
 
     // MARK: - Shelf

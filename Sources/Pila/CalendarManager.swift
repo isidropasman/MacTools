@@ -14,6 +14,15 @@ final class CalendarManager: ObservableObject {
         let isNow: Bool
         /// One entry per account holding this event. Being invited on two accounts is one meeting.
         let accounts: [String]
+        let meeting: MeetingLink.Match?
+
+        /// The window where joining is what you actually want to do.
+        var isJoinable: Bool {
+            guard self.meeting != nil, !self.isAllDay else { return false }
+            if self.isNow { return true }
+            let minutes = self.start.timeIntervalSinceNow / 60
+            return minutes >= 0 && minutes <= 10
+        }
 
         var timeLabel: String {
             if self.isAllDay { return "Todo el día" }
@@ -136,7 +145,8 @@ final class CalendarManager: ObservableObject {
                     isAllDay: existing.isAllDay,
                     color: existing.color,
                     isNow: existing.isNow,
-                    accounts: existing.accounts + [account]
+                    accounts: existing.accounts + [account],
+                    meeting: existing.meeting
                 )
             } else {
                 order.append(key)
@@ -148,7 +158,8 @@ final class CalendarManager: ObservableObject {
                     isAllDay: event.isAllDay,
                     color: event.calendar?.color ?? .systemBlue,
                     isNow: event.startDate <= now && event.endDate >= now,
-                    accounts: account.isEmpty ? [] : [account]
+                    accounts: account.isEmpty ? [] : [account],
+                    meeting: MeetingLink.find(in: [event.url?.absoluteString, event.location, event.notes])
                 )
             }
         }

@@ -23,6 +23,9 @@ final class HistoryModel: ObservableObject {
     @Published private(set) var items: [ClipItem] = []
     @Published var selection = 0
     @Published var dictationWarning = false
+    /// Cached: this used to run COUNT(*) plus a SUM over the whole table on every SwiftUI body
+    /// evaluation, which meant a full scan per keystroke while typing in the search field.
+    @Published private(set) var statsText = ""
     @Published private(set) var justCopiedID: Int64?
     @Published var previewing = false
 
@@ -56,6 +59,7 @@ final class HistoryModel: ObservableObject {
     func reload() {
         let previous = self.selectedItem?.id
         self.items = self.store.items(query: self.query, filter: self.filter)
+        self.refreshStats()
         if let previous, let index = items.firstIndex(where: { $0.id == previous }) {
             self.selection = index
         } else {
@@ -145,9 +149,9 @@ final class HistoryModel: ObservableObject {
         self.reload()
     }
 
-    func stats() -> String {
+    private func refreshStats() {
         let counts = self.store.counts()
         let bytes = ByteCountFormatter.string(fromByteCount: counts.imageBytes, countStyle: .file)
-        return "\(counts.total) items · \(counts.images) imágenes · \(bytes)"
+        self.statsText = "\(counts.total) items · \(counts.images) imágenes · \(bytes)"
     }
 }
