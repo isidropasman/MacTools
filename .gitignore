@@ -1,0 +1,11 @@
+.build/
+Pila.app/
+Pila.iconset/
+.DS_Store
+.gstack/
+
+# Derivado de Tools/make-icon.swift; build.sh lo regenera si falta
+Pila.icns
+
+# Proyecto aparte que vive en esta carpeta. Pendiente decidir si entra al repo.
+llmpet/
