@@ -45,6 +45,8 @@ final class CalendarManager: ObservableObject {
         case unknown
         case granted
         case denied
+        /// Granted, but only for writing. EventKit hands this out too and it cannot read events.
+        case writeOnly
     }
 
     @Published private(set) var events: [Event] = []
@@ -64,11 +66,24 @@ final class CalendarManager: ObservableObject {
 
     func start() {
         self.refreshAccess()
+
+        // Re-reads the authorisation, not just the events. Polling reload() instead left the app
+        // stuck on whatever status it saw at launch, so a grant made anywhere but our own button
+        // went unnoticed until the next relaunch.
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 60, repeating: 60)
-        timer.setEventHandler { [weak self] in self?.reload() }
+        timer.schedule(deadline: .now() + 30, repeating: 30)
+        timer.setEventHandler { [weak self] in self?.refreshAccess() }
         timer.resume()
         self.timer = timer
+
+        // Granting in System Settings brings that window forward and ours back afterwards.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshAccess() }
+        }
 
         NotificationCenter.default.addObserver(
             forName: .EKEventStoreChanged,
@@ -85,24 +100,23 @@ final class CalendarManager: ObservableObject {
     }
 
     func requestAccess() {
-        self.store.requestFullAccessToEvents { [weak self] granted, _ in
-            Task { @MainActor in
-                self?.access = granted ? .granted : .denied
-                if granted { self?.reload() }
-            }
+        self.store.requestFullAccessToEvents { [weak self] _, _ in
+            // The boolean lies about write-only grants; read the real status back instead.
+            Task { @MainActor in self?.refreshAccess() }
         }
     }
 
     private func refreshAccess() {
+        let next: Access
         switch EKEventStore.authorizationStatus(for: .event) {
-        case .fullAccess:
-            self.access = .granted
-            self.reload()
-        case .denied, .restricted:
-            self.access = .denied
-        default:
-            self.access = .unknown
+        case .fullAccess: next = .granted
+        case .writeOnly: next = .writeOnly
+        case .denied, .restricted: next = .denied
+        default: next = .unknown
         }
+
+        if next != self.access { self.access = next }
+        if next == .granted { self.reload() }
     }
 
     /// Today only, from now on. A past meeting in the notch is noise.

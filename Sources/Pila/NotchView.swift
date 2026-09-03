@@ -429,6 +429,11 @@ struct NotchView: View {
                 }
                 .foregroundStyle(.white)
             }
+        case .writeOnly:
+            Text("El permiso quedó en «solo escritura» y no alcanza para leer. Cambialo a acceso completo en Ajustes → Privacidad → Calendarios.")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.5))
+                .frame(maxWidth: .infinity, alignment: .leading)
         case .denied:
             Text("Permiso de calendario denegado. Activalo en Ajustes del sistema.")
                 .font(.footnote)
