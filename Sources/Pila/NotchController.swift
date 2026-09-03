@@ -118,6 +118,7 @@ final class NotchController {
                 defer { self.lastTrackKey = key }
 
                 // First sample only seeds the baseline; announcing it would fire on every launch.
+                guard Settings.peekOnTrackChangeNow else { return }
                 guard let previous = self.lastTrackKey, previous != key, track.isPlaying else { return }
                 self.peek(NotchState.Peek(
                     title: track.title,

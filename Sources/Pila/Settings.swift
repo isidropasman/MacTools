@@ -16,6 +16,7 @@ final class Settings: ObservableObject {
         static let maxImageGB = "MaxImageGB"
         static let ingestDictations = "IngestDictations"
         static let useNotch = "UseNotch"
+        static let peekOnTrackChange = "PeekOnTrackChange"
     }
 
     /// Fires when the shortcut changes so the app can re-register it.
@@ -50,6 +51,11 @@ final class Settings: ObservableObject {
         didSet { self.defaults.set(self.useNotch, forKey: Key.useNotch) }
     }
 
+    /// Off by default: a song changes far too often for the notch to announce every one of them.
+    @Published var peekOnTrackChange: Bool {
+        didSet { self.defaults.set(self.peekOnTrackChange, forKey: Key.peekOnTrackChange) }
+    }
+
     private init() {
         let stored = self.defaults.object(forKey: Key.keyCode) as? Int
         self.keyCode = UInt32(stored ?? kVK_ANSI_V)
@@ -59,6 +65,7 @@ final class Settings: ObservableObject {
         self.maxImageGB = self.defaults.object(forKey: Key.maxImageGB) as? Double ?? 2
         self.ingestDictations = self.defaults.object(forKey: Key.ingestDictations) as? Bool ?? true
         self.useNotch = self.defaults.object(forKey: Key.useNotch) as? Bool ?? true
+        self.peekOnTrackChange = self.defaults.object(forKey: Key.peekOnTrackChange) as? Bool ?? false
     }
 
     var maxImageBytes: Int64 { Int64(self.maxImageGB * 1024 * 1024 * 1024) }
@@ -66,6 +73,10 @@ final class Settings: ObservableObject {
     // Background pollers cannot hop to the main actor just to read a flag; UserDefaults is thread-safe.
     nonisolated static var ingestDictationsNow: Bool {
         UserDefaults.standard.object(forKey: "IngestDictations") as? Bool ?? true
+    }
+
+    nonisolated static var peekOnTrackChangeNow: Bool {
+        UserDefaults.standard.object(forKey: "PeekOnTrackChange") as? Bool ?? false
     }
 
     nonisolated static var maxImagesNow: Int {

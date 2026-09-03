@@ -62,6 +62,13 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Notch") {
+                Toggle("Asomarse al cambiar de canción", isOn: self.$settings.peekOnTrackChange)
+                Text("La notch siempre avisa cuando enchufás o desenchufás el cargador.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Cuentas de calendario") {
                 if self.calendar.accounts.isEmpty {
                     Text("Sin cuentas. Agregalas en Ajustes → Cuentas de Internet.")
