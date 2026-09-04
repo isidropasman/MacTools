@@ -79,6 +79,8 @@ final class PanelController: NSObject, NSWindowDelegate {
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        // The history is the last thing that should end up in a shared screen.
+        panel.sharingType = Settings.hideFromCaptureNow ? .none : .readOnly
         panel.delegate = self
 
         for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton] {

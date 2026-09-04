@@ -17,6 +17,7 @@ final class Settings: ObservableObject {
         static let ingestDictations = "IngestDictations"
         static let useNotch = "UseNotch"
         static let peekOnTrackChange = "PeekOnTrackChange"
+        static let hideFromCapture = "HideFromCapture"
     }
 
     /// Fires when the shortcut changes so the app can re-register it.
@@ -56,6 +57,21 @@ final class Settings: ObservableObject {
         didSet { self.defaults.set(self.peekOnTrackChange, forKey: Key.peekOnTrackChange) }
     }
 
+    /// Excludes the windows from screen capture. The clipboard holds whatever you copied, secrets
+    /// included, so leaking it into a shared screen is worse than any UI complaint.
+    @Published var hideFromCapture: Bool {
+        didSet {
+            self.defaults.set(self.hideFromCapture, forKey: Key.hideFromCapture)
+            self.captureVisibilityChanged.send()
+        }
+    }
+
+    let captureVisibilityChanged = PassthroughSubject<Void, Never>()
+
+    nonisolated static var hideFromCaptureNow: Bool {
+        UserDefaults.standard.object(forKey: "HideFromCapture") as? Bool ?? true
+    }
+
     private init() {
         let stored = self.defaults.object(forKey: Key.keyCode) as? Int
         self.keyCode = UInt32(stored ?? kVK_ANSI_V)
@@ -66,6 +82,7 @@ final class Settings: ObservableObject {
         self.ingestDictations = self.defaults.object(forKey: Key.ingestDictations) as? Bool ?? true
         self.useNotch = self.defaults.object(forKey: Key.useNotch) as? Bool ?? true
         self.peekOnTrackChange = self.defaults.object(forKey: Key.peekOnTrackChange) as? Bool ?? false
+        self.hideFromCapture = self.defaults.object(forKey: Key.hideFromCapture) as? Bool ?? true
     }
 
     var maxImageBytes: Int64 { Int64(self.maxImageGB * 1024 * 1024 * 1024) }

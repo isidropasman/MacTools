@@ -62,6 +62,13 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Privacidad") {
+                Toggle("Ocultar de capturas y pantalla compartida", isOn: self.$settings.hideFromCapture)
+                Text("La notch y el historial dejan de aparecer en grabaciones, capturas y Zoom o Meet. Vos los seguís viendo.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Notch") {
                 Toggle("Asomarse al cambiar de canción", isOn: self.$settings.peekOnTrackChange)
                 Text("La notch siempre avisa cuando enchufás o desenchufás el cargador.")

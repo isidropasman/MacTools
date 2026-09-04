@@ -100,6 +100,14 @@ final class NotchController {
 
         self.observePeeks()
 
+        Settings.shared.captureVisibilityChanged
+            .receive(on: RunLoop.main)
+            .sink { [weak self] in
+                let type: NSWindow.SharingType = Settings.hideFromCaptureNow ? .none : .readOnly
+                for surface in self?.surfaces ?? [] { surface.panel.sharingType = type }
+            }
+            .store(in: &self.cancellables)
+
         self.state.$expanded
             .receive(on: RunLoop.main)
             .sink { [weak self] expanded in
@@ -190,6 +198,7 @@ final class NotchController {
         panel.isMovable = false
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        panel.sharingType = Settings.hideFromCaptureNow ? .none : .readOnly
 
         let container = HoverView(frame: NSRect(origin: .zero, size: size))
         container.notchRect = NSRect(
