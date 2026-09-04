@@ -56,7 +56,10 @@ struct NotchView: View {
     var body: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .top) {
-                Color.black
+                // Nothing is drawn while closed. Painting the cutout black looked fine in theory,
+                // but the rounded shape never lines up with the real bezel and reads as a blob
+                // hanging off the menu bar.
+                Color.black.opacity(self.state.isOpen ? 1 : 0)
 
                 // Always laid out at full width so nothing reflows mid-animation; the container
                 // clips it. Swapping views with if/else instead would pop, not grow.
