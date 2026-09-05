@@ -22,17 +22,11 @@ enum NotchGeometry {
         self.rect(on: screen) != nil
     }
 
-    /// `NSRect.contains` excludes the max edge, and at the top of the screen the pointer clamps to
-    /// exactly that edge, so a strict containment test never matched. Anything above the anchor's
-    /// bottom edge and within its columns counts as being on the notch.
-    static func pointerIsOnNotch(_ pointer: NSPoint, anchor: NSRect, slack: CGFloat = 6) -> Bool {
-        pointer.x >= anchor.minX - slack
-            && pointer.x <= anchor.maxX + slack
-            && pointer.y >= anchor.minY - slack
+    static func displayID(of screen: NSScreen) -> CGDirectDisplayID {
+        screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
     }
 
-    /// Screens without a cutout get a synthetic one at the top centre, so an external monitor
-    /// still has somewhere for the panel to hang from.
+    /// Where the panel hangs from. Screens without a cutout get a synthetic one at the top centre.
     static func anchor(on screen: NSScreen, syntheticWidth: CGFloat = 185, syntheticHeight: CGFloat = 32) -> NSRect {
         if let real = self.rect(on: screen) { return real }
         return NSRect(
@@ -41,5 +35,34 @@ enum NotchGeometry {
             width: syntheticWidth,
             height: syntheticHeight
         )
+    }
+
+    /// Where hovering opens it. On a real notch that is the cutout, which the eye can aim at. On a
+    /// monitor there is nothing to aim at, so it takes a deliberate push into the very top edge.
+    static func trigger(on screen: NSScreen) -> NSRect {
+        if let real = self.rect(on: screen) { return real }
+
+        let width: CGFloat = 140
+        let height: CGFloat = 4
+        return NSRect(
+            x: screen.frame.midX - width / 2,
+            y: screen.frame.maxY - height,
+            width: width,
+            height: height
+        )
+    }
+
+    /// `NSRect.contains` excludes the max edge, and at the top of the screen the pointer clamps to
+    /// exactly that edge, so a strict containment test never matched. Anything above the trigger's
+    /// bottom edge and within its columns counts.
+    static func pointerIsOnNotch(_ pointer: NSPoint, trigger: NSRect, slack: CGFloat) -> Bool {
+        pointer.x >= trigger.minX - slack
+            && pointer.x <= trigger.maxX + slack
+            && pointer.y >= trigger.minY - slack
+    }
+
+    /// A physical cutout forgives a few points; a synthetic one should not.
+    static func slack(on screen: NSScreen) -> CGFloat {
+        self.hasNotch(screen) ? 6 : 1
     }
 }

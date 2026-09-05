@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -16,21 +17,29 @@ final class NotchState: ObservableObject {
     }
 
     @Published var tab: NotchTab = .music
-    @Published var expanded = false
+    /// Which display is showing the panel. One shared flag opened every screen at once.
+    @Published var expandedScreen: CGDirectDisplayID?
     @Published var peek: Peek?
+    @Published var peekScreen: CGDirectDisplayID?
+
+    func isExpanded(on screen: CGDirectDisplayID) -> Bool { self.expandedScreen == screen }
+    func peek(on screen: CGDirectDisplayID) -> Peek? { self.peekScreen == screen ? self.peek : nil }
 
     /// Hovering always wins over a peek, so the pointer never fights an animation it did not start.
-    var isOpen: Bool { self.expanded || self.peek != nil }
+    func isOpen(on screen: CGDirectDisplayID) -> Bool {
+        self.isExpanded(on: screen) || self.peek(on: screen) != nil
+    }
 
-    var currentHeight: CGFloat {
-        if self.expanded { return self.contentHeight }
-        return self.peek != nil ? Self.peekHeight : 0
+    func currentHeight(on screen: CGDirectDisplayID) -> CGFloat {
+        if self.isExpanded(on: screen) { return self.contentHeight }
+        return self.peek(on: screen) != nil ? Self.peekHeight : 0
     }
 
     /// Music is one compact row; the shelf needs an icon plus its filename, the agenda a list.
     var contentHeight: CGFloat {
         switch self.tab {
         case .music: return 132
+        case .tasks: return 186
         case .calendar: return 180
         case .shelf: return 172
         }

@@ -15,7 +15,8 @@ private final class HoverView: NSView {
     }
     /// Same region in screen coordinates. A tracking area can fire from further out than its rect
     /// suggests, so entering is confirmed against the real pointer position before opening.
-    var notchScreenRect: NSRect = .zero
+    var triggerScreenRect: NSRect = .zero
+    var slack: CGFloat = 6
     var expanded = false {
         didSet { self.updateTrackingAreas() }
     }
@@ -45,7 +46,9 @@ private final class HoverView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        guard self.expanded || NotchGeometry.pointerIsOnNotch(NSEvent.mouseLocation, anchor: self.notchScreenRect) else { return }
+        guard self.expanded
+            || NotchGeometry.pointerIsOnNotch(NSEvent.mouseLocation, trigger: self.triggerScreenRect, slack: self.slack)
+        else { return }
         self.onEnter?()
     }
 
@@ -81,6 +84,7 @@ final class NotchController {
     private let calendar: CalendarManager
     private let state = NotchState()
     private let thumbnails = ShelfThumbnails()
+    private let tasks = TaskStore()
 
     init(media: MediaController, shelf: ShelfStore, battery: BatteryMonitor, calendar: CalendarManager) {
         self.media = media
@@ -108,10 +112,12 @@ final class NotchController {
             }
             .store(in: &self.cancellables)
 
-        self.state.$expanded
+        self.state.$expandedScreen
             .receive(on: RunLoop.main)
-            .sink { [weak self] expanded in
-                for surface in self?.surfaces ?? [] { surface.hover.expanded = expanded }
+            .sink { [weak self] expandedScreen in
+                for surface in self?.surfaces ?? [] {
+                    surface.hover.expanded = NotchGeometry.displayID(of: surface.screen) == expandedScreen
+                }
             }
             .store(in: &self.cancellables)
     }
@@ -156,9 +162,10 @@ final class NotchController {
 
     private func peek(_ peek: NotchState.Peek) {
         // Hovering wins: never yank the panel out from under a pointer that is already using it.
-        guard !self.state.expanded else { return }
+        guard self.state.expandedScreen == nil else { return }
 
         self.peekTask?.cancel()
+        self.state.peekScreen = NotchGeometry.displayID(of: NSScreen.main ?? NSScreen.screens[0])
         self.state.peek = peek
         self.peekTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(2600))
@@ -169,7 +176,7 @@ final class NotchController {
 
     private func rebuild() {
         for surface in self.surfaces { surface.panel.orderOut(nil) }
-        self.state.expanded = false
+        self.state.expandedScreen = nil
         self.surfaces = NSScreen.screens.map { self.makeSurface(for: $0) }
     }
 
@@ -201,14 +208,16 @@ final class NotchController {
         panel.sharingType = Settings.hideFromCaptureNow ? .none : .readOnly
 
         let container = HoverView(frame: NSRect(origin: .zero, size: size))
+        let trigger = NotchGeometry.trigger(on: screen)
         container.notchRect = NSRect(
-            x: (size.width - anchor.width) / 2,
-            y: size.height - anchor.height,
-            width: anchor.width,
-            height: anchor.height
+            x: trigger.minX - frame.minX,
+            y: trigger.minY - frame.minY,
+            width: trigger.width,
+            height: trigger.height
         )
-        container.notchScreenRect = anchor
-        container.onEnter = { [weak self] in self?.expand() }
+        container.triggerScreenRect = trigger
+        container.slack = NotchGeometry.slack(on: screen)
+        container.onEnter = { [weak self] in self?.expand(on: screen) }
         container.onExit = { [weak self] in self?.scheduleCollapse() }
 
         let hosting = NSHostingView(rootView: NotchView(
@@ -218,10 +227,12 @@ final class NotchController {
             state: self.state,
             calendar: self.calendar,
             thumbnails: self.thumbnails,
+            tasks: self.tasks,
             notchHeight: anchor.height,
             notchWidth: anchor.width,
+            screenID: NotchGeometry.displayID(of: screen),
             onDropTargeted: { [weak self] active in
-                if active { self?.expand() }
+                if active { self?.expand(on: screen) }
             }
         ))
         hosting.frame = container.bounds
@@ -236,26 +247,29 @@ final class NotchController {
 
     /// Brushing past the notch on the way to the menu bar should not open it, so opening waits
     /// for the pointer to actually settle there.
-    private func expand() {
+    private func expand(on screen: NSScreen) {
         self.collapseTask?.cancel()
-        guard !self.state.expanded, self.expandTask == nil else { return }
+        let id = NotchGeometry.displayID(of: screen)
+        guard self.state.expandedScreen != id, self.expandTask == nil else { return }
 
         self.expandTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(160))
             guard !Task.isCancelled, let self else { return }
             self.expandTask = nil
-            guard self.pointerIsOverAnyNotch() else { return }
+            guard self.pointerIsOnTrigger(of: screen) else { return }
             self.peekTask?.cancel()
             self.state.peek = nil
-            self.state.expanded = true
+            // Only the display holding the pointer opens; the others stay shut.
+            self.state.expandedScreen = id
         }
     }
 
-    private func pointerIsOverAnyNotch() -> Bool {
-        let pointer = NSEvent.mouseLocation
-        return self.surfaces.contains {
-            NotchGeometry.pointerIsOnNotch(pointer, anchor: NotchGeometry.anchor(on: $0.screen))
-        }
+    private func pointerIsOnTrigger(of screen: NSScreen) -> Bool {
+        NotchGeometry.pointerIsOnNotch(
+            NSEvent.mouseLocation,
+            trigger: NotchGeometry.trigger(on: screen),
+            slack: NotchGeometry.slack(on: screen)
+        )
     }
 
     /// A grace period keeps the panel open while the pointer crosses its own edge.
@@ -266,7 +280,7 @@ final class NotchController {
         self.collapseTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
-            self?.state.expanded = false
+            self?.state.expandedScreen = nil
         }
     }
 }

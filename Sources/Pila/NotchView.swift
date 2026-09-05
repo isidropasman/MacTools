@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 enum NotchTab: String, CaseIterable, Identifiable {
     case music
+    case tasks
     case calendar
     case shelf
 
@@ -11,6 +12,7 @@ enum NotchTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .music: return "Música"
+        case .tasks: return "Tareas"
         case .calendar: return "Agenda"
         case .shelf: return "Archivos"
         }
@@ -19,6 +21,7 @@ enum NotchTab: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .music: return "music.note"
+        case .tasks: return "checklist"
         case .calendar: return "calendar"
         case .shelf: return "tray.full"
         }
@@ -32,24 +35,28 @@ struct NotchView: View {
     @ObservedObject var state: NotchState
     @ObservedObject var calendar: CalendarManager
     @ObservedObject var thumbnails: ShelfThumbnails
+    @ObservedObject var tasks: TaskStore
     /// Height of the physical cutout. Content must start below it or the camera housing eats it.
     let notchHeight: CGFloat
     /// Width of the cutout, so the strip beside it can carry content instead of being padding.
     let notchWidth: CGFloat
+    let screenID: CGDirectDisplayID
     let onDropTargeted: (Bool) -> Void
 
     @State private var dropActive = false
     @Namespace private var tabNamespace
     /// Set while dragging the progress bar, so the bar follows the finger instead of the player.
     @State private var scrubFraction: Double?
+    @State private var taskInput = ""
 
-    private var expanded: Bool { self.state.expanded }
+    private var expanded: Bool { self.state.isExpanded(on: self.screenID) }
+    private var isOpen: Bool { self.state.isOpen(on: self.screenID) }
 
     /// Radii grow with the panel: tight like the real cutout when closed, wide when open.
     private var shape: NotchShape {
         NotchShape(
-            topRadius: self.state.isOpen ? 19 : 6,
-            bottomRadius: self.state.isOpen ? 24 : 14
+            topRadius: self.isOpen ? 19 : 6,
+            bottomRadius: self.isOpen ? 24 : 14
         )
     }
 
@@ -59,7 +66,7 @@ struct NotchView: View {
                 // Nothing is drawn while closed. Painting the cutout black looked fine in theory,
                 // but the rounded shape never lines up with the real bezel and reads as a blob
                 // hanging off the menu bar.
-                Color.black.opacity(self.state.isOpen ? 1 : 0)
+                Color.black.opacity(self.isOpen ? 1 : 0)
 
                 // Always laid out at full width so nothing reflows mid-animation; the container
                 // clips it. Swapping views with if/else instead would pop, not grow.
@@ -68,19 +75,19 @@ struct NotchView: View {
                     .opacity(self.expanded ? 1 : 0)
                     .animation(.easeOut(duration: 0.18).delay(self.expanded ? 0.08 : 0), value: self.expanded)
 
-                if let peek = state.peek, !self.expanded {
+                if let peek = state.peek(on: self.screenID), !self.expanded {
                     self.peekStrip(peek)
                         .frame(width: NotchState.windowWidth, height: NotchState.peekHeight, alignment: .top)
                         .transition(.opacity)
                 }
             }
             .frame(
-                width: self.state.isOpen ? NotchState.windowWidth : self.notchWidth,
-                height: self.state.isOpen ? self.state.currentHeight : self.notchHeight,
+                width: self.isOpen ? NotchState.windowWidth : self.notchWidth,
+                height: self.isOpen ? self.state.currentHeight(on: self.screenID) : self.notchHeight,
                 alignment: .top
             )
             .clipShape(self.shape)
-            .overlay(self.shape.stroke(.white.opacity(self.state.isOpen ? (self.dropActive ? 0.5 : 0.10) : 0), lineWidth: 1))
+            .overlay(self.shape.stroke(.white.opacity(self.isOpen ? (self.dropActive ? 0.5 : 0.10) : 0), lineWidth: 1))
             // The window never resizes; this is the only thing that moves.
             .animation(.spring(response: 0.38, dampingFraction: 0.78), value: self.expanded)
             .animation(.spring(response: 0.34, dampingFraction: 0.8), value: self.state.peek)
@@ -100,6 +107,7 @@ struct NotchView: View {
             Group {
                 switch self.state.tab {
                 case .music: self.musicTab
+                case .tasks: self.tasksTab
                 case .calendar: self.calendarTab
                 case .shelf: self.shelfTab
                 }
@@ -171,6 +179,7 @@ struct NotchView: View {
         HStack(spacing: 0) {
             HStack(spacing: 4) {
                 self.tabButton(.music)
+                self.tabButton(.tasks)
                 self.tabButton(.calendar)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -364,6 +373,94 @@ struct NotchView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Tasks
+
+    @ViewBuilder
+    private var tasksTab: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.4))
+                TextField("Tarea  #proyecto @app !tipo en 25m", text: self.$taskInput)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white)
+                    .onSubmit {
+                        self.tasks.add(self.taskInput)
+                        self.taskInput = ""
+                    }
+            }
+            .padding(.bottom, 2)
+
+            if self.tasks.pending.isEmpty {
+                Text("Sin tareas pendientes")
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.4))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 5) {
+                        ForEach(self.tasks.pending) { task in
+                            self.taskRow(task)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func taskRow(_ task: TodoTask) -> some View {
+        HStack(spacing: 8) {
+            Button { self.tasks.toggle(task) } label: {
+                Image(systemName: "circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.45))
+            }
+            .buttonStyle(.plain)
+
+            Text(task.title)
+                .font(.system(size: 12))
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            if let project = task.project {
+                self.chip("#" + project, tint: .blue)
+            }
+            if let type = task.type {
+                self.chip("!" + type, tint: .purple)
+            }
+            if let app = task.app, let url = TaskStore.appURL(named: app) {
+                Button { NSWorkspace.shared.open(url) } label: {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                        .resizable()
+                        .frame(width: 14, height: 14)
+                }
+                .buttonStyle(.plain)
+                .help("Abrir " + app)
+            }
+            if let due = task.dueLabel {
+                Text(due)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(task.isOverdue ? AnyShapeStyle(Color.red) : AnyShapeStyle(.white.opacity(0.5)))
+            }
+        }
+        .foregroundStyle(.white)
+        .contextMenu {
+            Button("Eliminar", role: .destructive) { self.tasks.remove(task) }
+        }
+    }
+
+    private func chip(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .medium))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Capsule().fill(tint.opacity(0.25)))
+            .foregroundStyle(.white.opacity(0.85))
     }
 
     // MARK: - Calendar
