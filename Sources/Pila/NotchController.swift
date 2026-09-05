@@ -84,9 +84,11 @@ final class NotchController {
     private let calendar: CalendarManager
     private let state = NotchState()
     private let thumbnails = ShelfThumbnails()
-    private let tasks = TaskStore()
+    private let tasks: TaskStore
+    var onQuickAdd: (() -> Void)?
 
-    init(media: MediaController, shelf: ShelfStore, battery: BatteryMonitor, calendar: CalendarManager) {
+    init(media: MediaController, shelf: ShelfStore, battery: BatteryMonitor, calendar: CalendarManager, tasks: TaskStore) {
+        self.tasks = tasks
         self.media = media
         self.shelf = shelf
         self.battery = battery
@@ -233,7 +235,8 @@ final class NotchController {
             screenID: NotchGeometry.displayID(of: screen),
             onDropTargeted: { [weak self] active in
                 if active { self?.expand(on: screen) }
-            }
+            },
+            onQuickAdd: { [weak self] in self?.onQuickAdd?() }
         ))
         hosting.frame = container.bounds
         hosting.autoresizingMask = [.width, .height]

@@ -28,7 +28,19 @@ final class CalendarManager: ObservableObject {
             if self.isAllDay { return "Todo el día" }
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
-            return "\(formatter.string(from: self.start)) – \(formatter.string(from: self.end))"
+            let range = "\(formatter.string(from: self.start)) – \(formatter.string(from: self.end))"
+
+            // Only today's events can show a bare time; anything further needs its day or it lies.
+            let calendar = Calendar.current
+            if calendar.isDateInToday(self.start) { return range }
+            if calendar.isDateInTomorrow(self.start) { return "mañana " + range }
+
+            let day = DateFormatter()
+            day.locale = Locale(identifier: "es_AR")
+            day.dateFormat = calendar.isDate(self.start, equalTo: Date(), toGranularity: .weekOfYear)
+                ? "EEE"
+                : "d MMM"
+            return "\(day.string(from: self.start)) \(range)"
         }
 
         /// Only for what is coming up; a running meeting already says "ahora".
@@ -37,7 +49,9 @@ final class CalendarManager: ObservableObject {
             let minutes = Int(self.start.timeIntervalSinceNow / 60)
             guard minutes >= 0 else { return nil }
             if minutes < 60 { return "en \(minutes) min" }
-            return "en \(minutes / 60) h"
+            let hours = minutes / 60
+            if hours < 24 { return "en \(hours) h" }
+            return "en \(hours / 24) d"
         }
     }
 
@@ -125,9 +139,11 @@ final class CalendarManager: ObservableObject {
 
         let calendar = Calendar.current
         let now = Date()
-        let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+        // Two weeks, not just today. After the last meeting of the day the panel used to go blank,
+        // when what you want to know is what is coming next even if that is Monday.
+        let horizon = calendar.date(byAdding: .day, value: 14, to: now) ?? now
 
-        let predicate = self.store.predicateForEvents(withStart: now, end: endOfDay, calendars: nil)
+        let predicate = self.store.predicateForEvents(withStart: now, end: horizon, calendars: nil)
         let raw = self.store.events(matching: predicate)
             .filter { !$0.isAllDay || calendar.isDateInToday($0.startDate) }
             .sorted { $0.startDate < $1.startDate }

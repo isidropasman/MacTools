@@ -19,6 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shelf: ShelfStore?
     private var battery: BatteryMonitor?
     private var calendar: CalendarManager?
+    private var tasks: TaskStore?
+    private var quickAdd: QuickAddController?
+    private var quickAddHotKey: GlobalHotKey?
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -73,7 +76,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         calendar.start()
         self.calendar = calendar
 
-        let notch = NotchController(media: media, shelf: shelf, battery: battery, calendar: calendar)
+        let tasks = TaskStore()
+        self.tasks = tasks
+
+        let quickAdd = QuickAddController(tasks: tasks)
+        self.quickAdd = quickAdd
+        // Capture has to work from anywhere, not only with the pointer parked on the notch.
+        self.quickAddHotKey = GlobalHotKey(keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey)) { [weak quickAdd] in
+            quickAdd?.toggle()
+        }
+        if self.quickAddHotKey == nil {
+            NSLog("Pila: ⇧⌘T ya está tomado por otra app; queda el menú de la barra")
+        }
+
+        let notch = NotchController(media: media, shelf: shelf, battery: battery, calendar: calendar, tasks: tasks)
+        notch.onQuickAdd = { [weak quickAdd] in quickAdd?.show() }
         notch.install()
         self.notch = notch
 
@@ -127,6 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.addItem(withTitle: "Abrir historial  \(Settings.shared.shortcutDisplay)", action: #selector(self.openPanel), keyEquivalent: "")
+        menu.addItem(withTitle: "Nueva tarea  ⇧⌘T", action: #selector(self.openQuickAdd), keyEquivalent: "")
         menu.addItem(withTitle: "Configuración…", action: #selector(self.openSettings), keyEquivalent: ",")
         menu.addItem(.separator())
 
@@ -147,6 +165,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         item.menu = menu
         self.statusItem = item
+    }
+
+    @objc private func openQuickAdd() {
+        self.quickAdd?.show()
     }
 
     @objc private func openPanel() {

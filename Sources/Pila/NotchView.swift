@@ -42,12 +42,12 @@ struct NotchView: View {
     let notchWidth: CGFloat
     let screenID: CGDirectDisplayID
     let onDropTargeted: (Bool) -> Void
+    let onQuickAdd: () -> Void
 
     @State private var dropActive = false
     @Namespace private var tabNamespace
     /// Set while dragging the progress bar, so the bar follows the finger instead of the player.
     @State private var scrubFraction: Double?
-    @State private var taskInput = ""
 
     private var expanded: Bool { self.state.isExpanded(on: self.screenID) }
     private var isOpen: Bool { self.state.isOpen(on: self.screenID) }
@@ -380,20 +380,23 @@ struct NotchView: View {
     @ViewBuilder
     private var tasksTab: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.4))
-                TextField("Tarea  #proyecto @app !tipo en 25m", text: self.$taskInput)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white)
-                    .onSubmit {
-                        self.tasks.add(self.taskInput)
-                        self.taskInput = ""
-                    }
+            // Not a text field: the notch panel refuses key status on purpose, so anything typed
+            // here would go nowhere. Capture happens in its own focusable window.
+            Button(action: self.onQuickAdd) {
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 12))
+                    Text("Nueva tarea").font(.system(size: 12, weight: .medium))
+                    Spacer(minLength: 0)
+                    Text("⇧⌘T")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.14)))
+                }
+                .foregroundStyle(.white.opacity(0.75))
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
             }
-            .padding(.bottom, 2)
+            .buttonStyle(.plain)
 
             if self.tasks.pending.isEmpty {
                 Text("Sin tareas pendientes")
@@ -471,7 +474,7 @@ struct NotchView: View {
         case .granted:
             if self.calendar.events.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(self.calendar.accounts.isEmpty ? "No hay cuentas de calendario" : "Nada más por hoy")
+                    Text(self.calendar.accounts.isEmpty ? "No hay cuentas de calendario" : "Nada en las próximas dos semanas")
                         .font(.footnote)
                     if self.calendar.accounts.isEmpty {
                         Text("Agregá Google en Ajustes → Cuentas de Internet y aparece acá.")
