@@ -8,21 +8,37 @@ enum TaskParser {
     struct Parsed: Equatable {
         var title: String
         var project: String?
+        /// "#plexo/code" splits into project and section.
+        var section: String?
         var type: String?
         var app: String?
+        var priority: Int?
         var due: Date?
     }
 
+    /// p1 is the one you do now, p3 the one you might. Anything else stays part of the title.
+    static let priorityTokens = ["p1": 1, "p2": 2, "p3": 3]
+
     static func parse(_ input: String, now: Date = Date(), calendar: Calendar = .current) -> Parsed {
         var project: String?
+        var section: String?
         var type: String?
         var app: String?
+        var priority: Int?
         var words: [String] = []
 
         for token in input.split(separator: " ") {
             let text = String(token)
+            if let level = Self.priorityTokens[text.lowercased()] {
+                priority = level
+                continue
+            }
             switch text.first {
-            case "#" where text.count > 1: project = String(text.dropFirst())
+            case "#" where text.count > 1:
+                let body = String(text.dropFirst())
+                let parts = body.split(separator: "/", maxSplits: 1)
+                project = String(parts[0])
+                section = parts.count > 1 ? String(parts[1]) : nil
             case "!" where text.count > 1: type = String(text.dropFirst())
             case "@" where text.count > 1: app = String(text.dropFirst())
             default: words.append(text)
@@ -34,8 +50,10 @@ enum TaskParser {
         return Parsed(
             title: title.trimmingCharacters(in: .whitespaces),
             project: project,
+            section: section,
             type: type,
             app: app,
+            priority: priority,
             due: due
         )
     }

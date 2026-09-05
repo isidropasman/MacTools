@@ -91,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let notch = NotchController(media: media, shelf: shelf, battery: battery, calendar: calendar, tasks: tasks)
         notch.onQuickAdd = { [weak quickAdd] in quickAdd?.show() }
+        notch.onEditTask = { [weak quickAdd] task in quickAdd?.show(editing: task) }
         notch.install()
         self.notch = notch
 

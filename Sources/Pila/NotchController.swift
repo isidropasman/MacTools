@@ -86,6 +86,7 @@ final class NotchController {
     private let thumbnails = ShelfThumbnails()
     private let tasks: TaskStore
     var onQuickAdd: (() -> Void)?
+    var onEditTask: ((TodoTask) -> Void)?
 
     init(media: MediaController, shelf: ShelfStore, battery: BatteryMonitor, calendar: CalendarManager, tasks: TaskStore) {
         self.tasks = tasks
@@ -236,7 +237,8 @@ final class NotchController {
             onDropTargeted: { [weak self] active in
                 if active { self?.expand(on: screen) }
             },
-            onQuickAdd: { [weak self] in self?.onQuickAdd?() }
+            onQuickAdd: { [weak self] in self?.onQuickAdd?() },
+            onEditTask: { [weak self] task in self?.onEditTask?(task) }
         ))
         hosting.frame = container.bounds
         hosting.autoresizingMask = [.width, .height]

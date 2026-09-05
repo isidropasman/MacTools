@@ -5,8 +5,10 @@ struct TodoTask: Identifiable, Codable, Equatable {
     let id: UUID
     var title: String
     var project: String?
+    var section: String?
     var type: String?
     var app: String?
+    var priority: Int?
     var due: Date?
     var done: Bool
     var createdAt: Date
@@ -15,12 +17,35 @@ struct TodoTask: Identifiable, Codable, Equatable {
         self.id = UUID()
         self.title = parsed.title
         self.project = parsed.project
+        self.section = parsed.section
         self.type = parsed.type
         self.app = parsed.app
+        self.priority = parsed.priority
         self.due = parsed.due
         self.done = false
         self.createdAt = Date()
     }
+
+    /// Round-trips back into the input so editing starts from exactly what produced the task.
+    var asInput: String {
+        var parts = [self.title]
+        if let project {
+            parts.append("#" + project + (self.section.map { "/" + $0 } ?? ""))
+        }
+        if let app { parts.append("@" + app) }
+        if let type { parts.append("!" + type) }
+        if let priority { parts.append("p\(priority)") }
+        if let due {
+            let formatter = DateFormatter()
+            formatter.dateFormat = Calendar.current.isDateInToday(due) ? "HH:mm" : "'mañana' HH:mm"
+            if Calendar.current.isDateInToday(due) || Calendar.current.isDateInTomorrow(due) {
+                parts.append(formatter.string(from: due))
+            }
+        }
+        return parts.joined(separator: " ")
+    }
+
+    var priorityLabel: String? { self.priority.map { "p\($0)" } }
 
     var isOverdue: Bool {
         guard let due, !self.done else { return false }
@@ -72,7 +97,11 @@ final class TaskStore: ObservableObject {
                 case let (l?, r?): return l < r
                 case (_?, nil): return true
                 case (nil, _?): return false
-                default: return lhs.createdAt > rhs.createdAt
+                default:
+                    // No deadline on either: priority decides, then recency.
+                    let lp = lhs.priority ?? 9
+                    let rp = rhs.priority ?? 9
+                    return lp == rp ? lhs.createdAt > rhs.createdAt : lp < rp
                 }
             }
     }
@@ -87,6 +116,40 @@ final class TaskStore: ObservableObject {
         self.save()
         self.notifier.schedule(task)
         return task
+    }
+
+    /// Editing reparses the whole line, so every field can change at once, including the reminder.
+    func update(_ task: TodoTask, with input: String) {
+        guard let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        let parsed = TaskParser.parse(input)
+        guard !parsed.title.isEmpty else { return }
+
+        var updated = self.tasks[index]
+        updated.title = parsed.title
+        updated.project = parsed.project
+        updated.section = parsed.section
+        updated.type = parsed.type
+        updated.app = parsed.app
+        updated.priority = parsed.priority
+        updated.due = parsed.due
+        self.tasks[index] = updated
+
+        self.notifier.cancel(task)
+        self.notifier.schedule(updated)
+        self.save()
+    }
+
+    /// Projects are whatever you have used, so the list maintains itself and never drifts.
+    var projects: [String] {
+        Array(Set(self.tasks.compactMap(\.project))).sorted()
+    }
+
+    func sections(of project: String) -> [String] {
+        Array(Set(self.tasks.filter { $0.project == project }.compactMap(\.section))).sorted()
+    }
+
+    var types: [String] {
+        Array(Set(self.tasks.compactMap(\.type))).sorted()
     }
 
     func toggle(_ task: TodoTask) {

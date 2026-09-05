@@ -43,6 +43,7 @@ struct NotchView: View {
     let screenID: CGDirectDisplayID
     let onDropTargeted: (Bool) -> Void
     let onQuickAdd: () -> Void
+    let onEditTask: (TodoTask) -> Void
 
     @State private var dropActive = false
     @Namespace private var tabNamespace
@@ -427,11 +428,15 @@ struct NotchView: View {
             Text(task.title)
                 .font(.system(size: 12))
                 .lineLimit(1)
+                .onTapGesture { self.onEditTask(task) }
 
             Spacer(minLength: 4)
 
+            if let priority = task.priorityLabel {
+                self.chip(priority, tint: task.priority == 1 ? .red : .orange)
+            }
             if let project = task.project {
-                self.chip("#" + project, tint: .blue)
+                self.chip("#" + project + (task.section.map { "/" + $0 } ?? ""), tint: .blue)
             }
             if let type = task.type {
                 self.chip("!" + type, tint: .purple)
@@ -453,6 +458,7 @@ struct NotchView: View {
         }
         .foregroundStyle(.white)
         .contextMenu {
+            Button("Editar") { self.onEditTask(task) }
             Button("Eliminar", role: .destructive) { self.tasks.remove(task) }
         }
     }

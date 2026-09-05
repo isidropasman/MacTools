@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class QuickAddController: NSObject, NSWindowDelegate {
     private var window: NSPanel?
+    private var editing: TodoTask?
     private let tasks: TaskStore
     private var previousApp: NSRunningApplication?
 
@@ -17,10 +18,13 @@ final class QuickAddController: NSObject, NSWindowDelegate {
         if self.window?.isVisible == true { self.hide() } else { self.show() }
     }
 
-    func show() {
+    func show(editing task: TodoTask? = nil) {
         self.previousApp = NSWorkspace.shared.frontmostApplication
+        self.editing = task
 
-        let panel = self.window ?? self.makeWindow()
+        // Rebuilt each time so the field starts from the right content instead of stale state.
+        self.window?.orderOut(nil)
+        let panel = self.makeWindow()
         self.window = panel
 
         if let screen = NSScreen.main {
@@ -59,7 +63,7 @@ final class QuickAddController: NSObject, NSWindowDelegate {
             panel.standardWindowButton(button)?.isHidden = true
         }
 
-        let hosting = NSHostingView(rootView: QuickAddView(tasks: self.tasks) { [weak self] in
+        let hosting = NSHostingView(rootView: QuickAddView(tasks: self.tasks, editing: self.editing) { [weak self] in
             self?.hide()
         })
         panel.contentView = hosting
