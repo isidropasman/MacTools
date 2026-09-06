@@ -14,21 +14,21 @@ enum Tool: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .history: "Historial del portapapeles"
-        case .quickAdd: "Nueva tarea"
-        case .projects: "Proyectos y secciones"
-        case .sessions: "Sesiones de agentes"
-        case .notch: "Abrir la notch"
+        case .history: String(localized: "Historial del portapapeles")
+        case .quickAdd: String(localized: "Nueva tarea")
+        case .projects: String(localized: "Proyectos y secciones")
+        case .sessions: String(localized: "Sesiones de agentes")
+        case .notch: String(localized: "Abrir la notch")
         }
     }
 
     var detail: String {
         switch self {
-        case .history: "Todo lo que copiaste, con búsqueda, fijados y favoritos."
-        case .quickAdd: "Capturar una tarea con proyecto, prioridad y recordatorio."
-        case .projects: "La tabla para crear, renombrar y ordenar proyectos."
-        case .sessions: "Qué está corriendo en Claude, Codex y Conductor."
-        case .notch: "Desplegar el panel sin llevar el mouse hasta arriba."
+        case .history: String(localized: "Todo lo que copiaste, con búsqueda, fijados y favoritos.")
+        case .quickAdd: String(localized: "Capturar una tarea con proyecto, prioridad y recordatorio.")
+        case .projects: String(localized: "La tabla para crear, renombrar y ordenar proyectos.")
+        case .sessions: String(localized: "Qué está corriendo en Claude, Codex y Conductor.")
+        case .notch: String(localized: "Desplegar el panel sin llevar el mouse hasta arriba.")
         }
     }
 

@@ -13,3 +13,6 @@ Pila.icns
 # llmpet: app de monitoreo de sesiones LLM. Vive acá pero es su propio
 # SwiftPM package — el Package.swift de la raíz solo compila Sources/Pila.
 llmpet/.build/
+
+# Salida de release.sh
+dist/

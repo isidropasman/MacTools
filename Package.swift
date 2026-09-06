@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "MacTools",
-    platforms: [.macOS("26.0")],
+    platforms: [.macOS("14.0")],
     targets: [
         .executableTarget(
             name: "MacTools",

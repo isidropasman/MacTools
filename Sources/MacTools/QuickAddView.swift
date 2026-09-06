@@ -109,9 +109,11 @@ struct QuickAddView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .glassEffect(
-                    index == self.selection ? .regular.tint(.accentColor.opacity(0.6)) : .clear,
-                    in: .rect(cornerRadius: 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(index == self.selection
+                            ? AnyShapeStyle(Color.accentColor.opacity(0.6))
+                            : AnyShapeStyle(Color.clear))
                 )
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -214,12 +216,19 @@ struct QuickAddView: View {
                 Button("Quitar") { self.setProject(nil, nil) }
             }
         } label: {
-            self.pill(
-                self.preview.project.map { $0 + (self.preview.section.map { "/" + $0 } ?? "") } ?? "Proyecto",
-                symbol: "number",
-                active: self.preview.project != nil,
-                tint: self.tasks.color(of: self.preview.project)
-            )
+            let label = self.preview.project.map { $0 + (self.preview.section.map { "/" + $0 } ?? "") } ?? "Proyecto"
+            if let logo = tasks.logo(of: self.preview.project) {
+                // Pre-sized instead of framed: a Menu label drops the frame on a bitmap and the logo
+                // rendered at its full 256 px across the whole panel.
+                self.pill(label, icon: Image(nsImage: Self.scaled(logo)), active: true, tint: self.tasks.color(of: self.preview.project))
+            } else {
+                self.pill(
+                    label,
+                    symbol: self.preview.project == nil ? "number" : self.tasks.symbol(of: self.preview.project),
+                    active: self.preview.project != nil,
+                    tint: self.tasks.color(of: self.preview.project)
+                )
+            }
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .chip(active: self.preview.project != nil, tint: self.tasks.color(of: self.preview.project))
@@ -355,7 +364,7 @@ struct QuickAddView: View {
     /// the colour capsule has to be applied to the menu itself, from the outside.
     private func pill(_ text: String, icon: Image, active: Bool, tint: Color) -> some View {
         HStack(spacing: 5) {
-            icon.resizable().scaledToFit().frame(width: 12, height: 12)
+            icon.imageScale(.small).frame(width: 12, height: 12)
             Text(text)
                 .font(.system(size: 11, weight: active ? .medium : .regular))
                 .lineLimit(1)
@@ -364,6 +373,15 @@ struct QuickAddView: View {
         // taller than the ones built from SF Symbols.
         .frame(height: 14)
         .foregroundStyle(Self.ink(active: active, tint: tint))
+    }
+
+    private static func scaled(_ image: NSImage) -> NSImage {
+        guard let copy = image.copy() as? NSImage else { return image }
+        let ratio = image.size.width > 0 ? image.size.height / image.size.width : 1
+        copy.size = ratio > 1
+            ? NSSize(width: 13 / ratio, height: 13)
+            : NSSize(width: 13, height: 13 * ratio)
+        return copy
     }
 
     private static func ink(active: Bool, tint: Color) -> AnyShapeStyle {
@@ -454,8 +472,14 @@ private struct ChipFlow: Layout {
     var spacing: CGFloat
     var lineSpacing: CGFloat
 
+    /// The chip row lives in a fixed-width panel, so there is a real number to fall back on.
+    private static let fallbackWidth: CGFloat = 470
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
+        // An unbounded proposal made every chip fit on one line, which reported a width far past the
+        // window, which made the window resize, which proposed a bounded width again: AppKit gave up
+        // with "more Update Constraints passes than there are views" and the app died on Editar.
+        let width = (proposal.width.map { $0.isFinite ? $0 : Self.fallbackWidth } ?? Self.fallbackWidth)
         var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, used: CGFloat = 0
         for view in subviews {
             let size = view.sizeThatFits(.unspecified)
@@ -522,7 +546,7 @@ private struct InlineField: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .glassEffect(.regular, in: .capsule)
+        .background(Capsule().fill(.quaternary))
         .onAppear { self.focused = true }
     }
 }

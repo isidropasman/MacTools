@@ -7,20 +7,28 @@ struct SettingsView: View {
     @ObservedObject var settings: Settings
     @ObservedObject var calendar: CalendarManager
     @ObservedObject var sessions: SessionStore
+    @ObservedObject var tasks: TaskStore
+    @ObservedObject var setup: Setup
+    @ObservedObject var connectors: Connectors
+    @ObservedObject var shelf: ShelfStore
+    @ObservedObject var fluid: FluidVoiceControl
 
-    @State private var section: Section? = .tools
+    @State private var section: Section? = .overview
     @State private var recordingTool: Tool?
     @State private var notificationsAllowed: Bool?
     @State private var trusted = Paster.isTrusted
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
 
     enum Section: String, CaseIterable, Identifiable {
+        case overview = "Resumen"
         case tools = "Atajos"
-        case general = "General"
-        case history = "Historial"
-        case privacy = "Privacidad"
-        case notch = "Notch"
+        case clipboard = "Portapapeles"
+        case dictation = "Dictado"
+        case tasks = "Tareas"
         case agents = "Agentes"
+        case shelf = "Estante"
+        case notch = "Notch"
+        case privacy = "Privacidad"
         case connections = "Conexiones"
         case system = "Sistema"
 
@@ -28,12 +36,15 @@ struct SettingsView: View {
 
         var symbol: String {
             switch self {
-            case .tools: "square.grid.2x2"
-            case .general: "gearshape"
-            case .history: "clock.arrow.circlepath"
-            case .privacy: "hand.raised"
-            case .notch: "macbook"
+            case .overview: "square.grid.2x2"
+            case .tools: "command"
+            case .clipboard: "doc.on.clipboard"
+            case .dictation: "mic"
+            case .tasks: "checklist"
             case .agents: "cpu"
+            case .shelf: "tray.full"
+            case .notch: "macbook"
+            case .privacy: "hand.raised"
             case .connections: "point.3.connected.trianglepath.dotted"
             case .system: "desktopcomputer"
             }
@@ -44,30 +55,38 @@ struct SettingsView: View {
         NavigationSplitView {
             List(Section.allCases, selection: self.$section) { item in
                 Label(item.rawValue, systemImage: item.symbol)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .tag(item)
             }
-            .navigationSplitViewColumnWidth(min: 186, ideal: 186, max: 220)
+            .navigationSplitViewColumnWidth(min: 210, ideal: 210, max: 240)
             // Ajustes del sistema has no collapse control at all: the sidebar is the navigation, so
             // hiding it leaves the window with nowhere to go.
             .toolbar(removing: .sidebarToggle)
         } detail: {
             Form {
-                switch self.section ?? .tools {
+                switch self.section ?? .overview {
+                case .overview: self.overview
                 case .tools: self.tools
-                case .general: self.general
-                case .history: self.history
-                case .privacy: self.privacy
-                case .notch: self.notch
+                case .clipboard: self.clipboard
+                case .dictation: self.dictation
+                case .tasks: self.tasksSection
                 case .agents: self.agents
+                case .shelf: self.shelfSection
+                case .notch: self.notch
+                case .privacy: self.privacy
                 case .connections: self.connections
                 case .system: self.system
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle(self.section?.rawValue ?? "Atajos")
+            .navigationTitle(self.section?.rawValue ?? "Resumen")
         }
-        .frame(width: 720, height: 480)
+        .frame(width: 780, height: 520)
         .onAppear(perform: self.refreshPermissions)
+        .onReceive(NotificationCenter.default.publisher(for: .mactoolsShowAgents)) { _ in
+            self.section = .agents
+        }
         // Permissions are granted in another app, so nothing tells this window they changed. Without
         // the poll it kept insisting on a permission you had already given.
         .onReceive(Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()) { _ in
@@ -76,6 +95,251 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             self.refreshPermissions()
         }
+    }
+
+    /// One row per mini app. The point of merging everything was being able to see, in one glance,
+    /// what is on and what is not.
+    @ViewBuilder
+    private var overview: some View {
+        if !self.setup.isReady {
+            SwiftUI.Section {
+                ForEach(self.setup.pending) { step in
+                    HStack(spacing: 12) {
+                        Image(systemName: step.symbol)
+                            .font(.system(size: 14))
+                            .foregroundStyle(.orange)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(step.title).font(.system(size: 13, weight: .medium))
+                            Text(step.detail).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 12)
+                        Button(step.actionTitle, action: step.action)
+                    }
+                    .padding(.vertical, 3)
+                }
+            } header: {
+                Text("Falta configurar")
+            }
+        }
+
+        SwiftUI.Section("Herramientas") {
+            self.overviewRow(
+                "Portapapeles", "doc.on.clipboard",
+                detail: "Historial de todo lo que copiás",
+                state: .ok(Settings.shared.shortcut(for: .history).map(Settings.shared.display) ?? String(localized: "sin atajo")),
+                go: .clipboard
+            )
+            self.overviewRow(
+                "Dictado", "mic",
+                detail: LocalizedStringKey(self.fluid.isInstalled
+                    ? "FluidVoice \(self.fluid.installedVersion ?? "")"
+                        + (self.fluid.isRunning ? " · \(String(localized: "corriendo"))" : " · \(String(localized: "cerrado"))")
+                    : String(localized: "FluidVoice no está instalado")),
+                state: self.fluid.isInstalled
+                    ? (self.fluid.isRunning ? .ok(String(localized: "Activo")) : .warn(String(localized: "Cerrado")))
+                    : .warn(String(localized: "Falta")),
+                go: .dictation
+            )
+            self.overviewRow(
+                "Tareas", "checklist",
+                detail: LocalizedStringKey("\(self.tasks.pending.count) \(String(localized: "pendientes")) · \(self.tasks.projects.count) \(String(localized: "proyectos"))"),
+                state: .ok(Settings.shared.shortcut(for: .quickAdd).map(Settings.shared.display) ?? String(localized: "sin atajo")),
+                go: .tasks
+            )
+            self.overviewRow(
+                "Agentes", "cpu",
+                detail: LocalizedStringKey("\(self.connectors.list.filter(\.installed).count) / \(self.connectors.list.count) \(String(localized: "conectores"))"),
+                state: self.sessions.visible.isEmpty ? .idle(String(localized: "Nada corriendo")) : .ok("\(self.sessions.visible.count) \(String(localized: "sesiones"))"),
+                go: .agents
+            )
+            self.overviewRow(
+                "Estante", "tray.full",
+                detail: "Archivos parkeados en la notch",
+                state: self.shelf.items.isEmpty ? .idle(String(localized: "Vacío")) : .ok("\(self.shelf.items.count) \(String(localized: "archivos"))"),
+                go: .shelf
+            )
+            self.overviewRow(
+                "Notch", "macbook",
+                detail: "Música, agenda y batería",
+                state: .ok(String(localized: "Al pasar el mouse")),
+                go: .notch
+            )
+        }
+    }
+
+    private enum RowState {
+        case ok(String), warn(String), idle(String)
+
+        var text: String {
+            switch self { case let .ok(t), let .warn(t), let .idle(t): t }
+        }
+
+        var color: Color {
+            switch self { case .ok: .green; case .warn: .orange; case .idle: .secondary }
+        }
+    }
+
+    private func overviewRow(
+        _ title: LocalizedStringKey,
+        _ symbol: String,
+        detail: LocalizedStringKey,
+        state: RowState,
+        go: Section
+    ) -> some View {
+        Button { self.section = go } label: {
+            HStack(spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.system(size: 15))
+                    .foregroundStyle(.tint)
+                    .frame(width: 26)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.system(size: 13, weight: .medium))
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 12)
+
+                HStack(spacing: 5) {
+                    Circle().fill(state.color).frame(width: 7, height: 7)
+                    Text(state.text).font(.caption).foregroundStyle(.secondary)
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Dictado
+
+    @ViewBuilder
+    private var dictation: some View {
+        SwiftUI.Section {
+            if self.fluid.isInstalled {
+                LabeledContent("FluidVoice") {
+                    HStack(spacing: 8) {
+                        Text(self.fluid.installedVersion ?? "—").foregroundStyle(.secondary)
+                        Circle()
+                            .fill(self.fluid.isRunning ? Color.green : Color.orange)
+                            .frame(width: 7, height: 7)
+                        Button(self.fluid.isRunning ? "Cerrar" : "Abrir") {
+                            self.fluid.isRunning ? self.fluid.quit() : self.fluid.launch()
+                        }
+                        .controlSize(.small)
+                    }
+                }
+            } else {
+                HStack {
+                    Label("FluidVoice no está instalado", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                    Spacer()
+                    Button("Descargar") { self.fluid.openReleases() }
+                        .controlSize(.small)
+                }
+            }
+        } header: {
+            Text("Motor")
+        } footer: {
+            Text("El dictado corre en FluidVoice: ahí viven los modelos de voz y la captura de audio. MacTools lo controla desde acá en vez de duplicarlo, así sigue recibiendo las actualizaciones de ellos.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        if self.fluid.isInstalled {
+            SwiftUI.Section("Cómo dicta") {
+                Picker("Modo del atajo", selection: Binding(
+                    get: { self.fluid.string("HotkeyMode") ?? "toggle" },
+                    set: { self.fluid.set($0, for: "HotkeyMode") }
+                )) {
+                    Text("Tocar para arrancar y parar").tag("toggle")
+                    Text("Mantener apretado").tag("pressAndHold")
+                }
+                Picker("Cómo inserta el texto", selection: Binding(
+                    get: { self.fluid.string("TextInsertionMode") ?? "reliablePaste" },
+                    set: { self.fluid.set($0, for: "TextInsertionMode") }
+                )) {
+                    Text("Pegar (confiable)").tag("reliablePaste")
+                    Text("Tipear caracter por caracter").tag("typing")
+                }
+                LabeledContent("Modelo", value: self.fluid.string("SelectedSpeechModel") ?? "—")
+                LabeledContent("Idioma", value: self.fluid.string("OnboardingSelectedLanguageID") ?? "—")
+                Text("Tipear no avisa si el texto llegó, y en apps Electron se pierde en silencio. Los cambios se aplican cuando FluidVoice arranca de nuevo.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            SwiftUI.Section("En MacTools") {
+                Toggle("Guardar los dictados en el portapapeles", isOn: self.$settings.ingestDictations)
+            }
+
+            SwiftUI.Section("Actualizaciones") {
+                HStack {
+                    if self.fluid.checking {
+                        Text("Buscando…").foregroundStyle(.secondary)
+                    } else if let error = self.fluid.checkError {
+                        Text(error).foregroundStyle(.orange).font(.caption)
+                    } else if self.fluid.hasUpdate {
+                        Label("Hay una \(self.fluid.latestVersion ?? "") disponible", systemImage: "arrow.down.circle.fill")
+                            .foregroundStyle(.green)
+                            .font(.caption)
+                    } else if self.fluid.latestVersion != nil {
+                        Text("Estás al día").foregroundStyle(.secondary).font(.caption)
+                    } else {
+                        Text("Sin chequear").foregroundStyle(.secondary).font(.caption)
+                    }
+                    Spacer()
+                    Button("Buscar") { self.fluid.checkForUpdate() }
+                    Button("Descargar") { self.fluid.openReleases() }
+                        .disabled(!self.fluid.hasUpdate)
+                }
+            }
+        }
+    }
+
+    // MARK: - Tareas
+
+    @ViewBuilder
+    private var tasksSection: some View {
+        SwiftUI.Section {
+            LabeledContent("Pendientes", value: "\(self.tasks.pending.count)")
+            LabeledContent("Proyectos", value: "\(self.tasks.projects.count)")
+            Text("Escribí #proyecto/sección, @app, !tipo, p1 a p4 y «en 25m» en la misma línea; los tokens saltan a los chips solos.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Estante
+
+    @ViewBuilder
+    private var shelfSection: some View {
+        SwiftUI.Section {
+            LabeledContent("Archivos guardados", value: "\(self.shelf.items.count)")
+            LabeledContent("Ocupan", value: Self.sizeLabel(self.shelf.totalBytes))
+            HStack {
+                Button("Abrir la carpeta") { NSWorkspace.shared.open(ShelfStore.directory) }
+                Button("Vaciar", role: .destructive) { self.shelf.clear() }
+                    .disabled(self.shelf.items.isEmpty)
+                Spacer()
+            }
+        } footer: {
+            Text("Los archivos se copian al estante, así que mover o borrar el original no lo vacía. Doble clic abre, arrastralos afuera para copiarlos donde quieras.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private static func sizeLabel(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
     }
 
     @ViewBuilder
@@ -129,6 +393,29 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
+    private var clipboard: some View {
+        SwiftUI.Section("Al elegir un item") {
+            Toggle("Pegar automáticamente", isOn: self.$settings.pasteOnPick)
+            if self.settings.pasteOnPick, !self.trusted {
+                HStack(spacing: 8) {
+                    Label("Necesita permiso de Accesibilidad", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                    Button("Dar permiso") { Paster.requestPermission() }
+                        .controlSize(.small)
+                }
+            }
+            Text(self.settings.pasteOnPick
+                ? "Enter copia y pega en la app donde estabas."
+                : "Enter solo copia; pegás vos con ⌘V.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        self.history
+    }
+
+    @ViewBuilder
     private var general: some View {
         SwiftUI.Section("Al elegir un item") {
             Toggle("Pegar automáticamente", isOn: self.$settings.pasteOnPick)
@@ -158,12 +445,17 @@ struct SettingsView: View {
                     .frame(width: 80)
                     .multilineTextAlignment(.trailing)
             }
+            LabeledContent("Máximo de textos") {
+                TextField("", value: self.$settings.maxTexts, format: .number)
+                    .frame(width: 80)
+                    .multilineTextAlignment(.trailing)
+            }
             LabeledContent("Tope de imágenes (GB)") {
                 TextField("", value: self.$settings.maxImageGB, format: .number)
                     .frame(width: 80)
                     .multilineTextAlignment(.trailing)
             }
-            Text("El texto no se borra nunca. Los fijados tampoco.")
+            Text("Al pasarse del tope se borran los más viejos. Los fijados nunca.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -201,57 +493,62 @@ struct SettingsView: View {
 
     /// Everything the app needs from the system, with its real state and the one button that fixes
     /// it. Sending someone to hunt through System Settings is not a connection flow.
-    /// Everything llmpet used to configure in its own window.
+    /// Everything llmpet used to configure in its own window, plus what it never had: a way to
+    /// install the pieces instead of a README telling you to copy files.
     @ViewBuilder
     private var agents: some View {
-        SwiftUI.Section("Qué se monitorea") {
-            LabeledContent("Conductor") {
-                Text(FileManager.default.fileExists(
-                    atPath: NSHomeDirectory() + "/Library/Application Support/com.conductor.app/conductor.db")
-                    ? "Detectado" : "No encontrado")
-                    .foregroundStyle(.secondary)
-            }
-            LabeledContent("Claude Desktop") {
-                Text(FileManager.default.fileExists(atPath: "/Applications/Claude.app") ? "Detectado" : "No encontrado")
-                    .foregroundStyle(.secondary)
-            }
-            LabeledContent("Sesiones de terminal") {
-                Text("\(self.llmSessionCount) activas")
-                    .foregroundStyle(.secondary)
-            }
-        }
+        SwiftUI.Section {
+            ForEach(self.connectors.list) { connector in
+                HStack(spacing: 12) {
+                    Image(systemName: connector.symbol)
+                        .font(.system(size: 14))
+                        .foregroundStyle(connector.installed ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                        .frame(width: 24)
 
-        SwiftUI.Section("Extensión de Chrome") {
-            Text("Escuchando en localhost:\(String(LocalListener.port)). La extensión reporta las pestañas de ChatGPT y Claude; sin ella igual ves Conductor, Claude Desktop y las sesiones de terminal.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack {
-                Button("Abrir la carpeta de la extensión") {
-                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: Self.extensionPath)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(connector.name).font(.system(size: 13, weight: .medium))
+                        Text(connector.note ?? connector.detail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    if connector.installed {
+                        HStack(spacing: 5) {
+                            Circle().fill(.green).frame(width: 7, height: 7)
+                            Text("Conectado").font(.caption).foregroundStyle(.secondary)
+                        }
+                    } else if let install = connector.install {
+                        Button("Instalar", action: install)
+                    } else {
+                        Text("—").foregroundStyle(.tertiary)
+                    }
                 }
-                .disabled(!FileManager.default.fileExists(atPath: Self.extensionPath))
-                Spacer()
+                .padding(.vertical, 3)
             }
-        }
-
-        SwiftUI.Section("Hooks") {
-            Text("Los scripts de ~/.llmpet reportan lo que corre en la terminal. Se instalan una vez y siguen andando.")
+        } header: {
+            Text("Conectores")
+        } footer: {
+            Text("Instalar el hook de la terminal escribe en ~/.claude/settings.json y deja una copia del archivo anterior al lado.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+
+        SwiftUI.Section("Ahora mismo") {
+            LabeledContent("Sesiones visibles", value: "\(self.sessions.visible.count)")
+            LabeledContent("Esperando respuesta", value: "\(self.sessions.readyCount)")
             HStack {
                 Button("Abrir ~/.llmpet") {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: NSHomeDirectory() + "/.llmpet"))
+                    NSWorkspace.shared.open(URL(fileURLWithPath: Connectors.home))
                 }
-                .disabled(!FileManager.default.fileExists(atPath: NSHomeDirectory() + "/.llmpet"))
+                .disabled(!FileManager.default.fileExists(atPath: Connectors.home))
                 Spacer()
             }
         }
     }
 
-    private var llmSessionCount: Int { self.sessions.visible.count }
-
-    private static let extensionPath = NSHomeDirectory() + "/Desktop/Isidro/MacTools/llmpet/extension"
-
+    /// Everything the app needs from the system, with its real state and the one button that fixes
     @ViewBuilder
     private var connections: some View {
         SwiftUI.Section("Permisos") {
@@ -373,8 +670,8 @@ struct SettingsView: View {
     }
 
     private func permissionRow(
-        _ title: String,
-        detail: String,
+        _ title: LocalizedStringKey,
+        detail: LocalizedStringKey,
         symbol: String,
         state: PermissionState,
         action: @escaping () -> Void
@@ -409,6 +706,13 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var system: some View {
+        SwiftUI.Section("Idioma") {
+            LabeledContent("Idioma") { LanguagePicker() }
+            Text("La app está escrita en español; el resto de los idiomas se traducen. Cambiarlo pide reiniciarla.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
         SwiftUI.Section {
             Toggle("Abrir al iniciar sesión", isOn: self.$launchAtLogin)
                 .onChange(of: self.launchAtLogin) { _, enabled in

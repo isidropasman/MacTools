@@ -153,44 +153,58 @@ struct NotchView: View {
     }
 
     /// Deliberately not the full panel: a peek is a glance, so it shows one line and leaves.
+    /// The cutout splits the strip in two, so both halves have to carry something — putting the
+    /// icon alone on the left wasted half the width and truncated the text on the right.
     private func peekStrip(_ peek: NotchState.Peek) -> some View {
-        HStack(spacing: 0) {
-            Group {
+        // Explicit halves: with flexible frames the greedy Text took the whole strip and truncated
+        // itself long before it ran out of room.
+        let half = max((NotchState.windowWidth - 32 - self.notchWidth) / 2, 60)
+
+        return HStack(spacing: 0) {
+            HStack(spacing: 7) {
+                Spacer(minLength: 0)
+
+                // Artwork earns its place on the left; a bare symbol just steals width from the
+                // title, so it rides with the subtitle on the other side instead.
                 if peek.usesArtwork, let artwork = media.artwork {
                     Image(nsImage: artwork)
                         .resizable()
-                        .frame(width: 26, height: 26)
+                        .frame(width: 24, height: 24)
                         .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                } else {
-                    Image(systemName: peek.symbol)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(peek.tint)
-                        .frame(width: 26, height: 26)
                 }
+
+                Text(peek.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.trailing, 12)
+            .frame(width: half - 10, alignment: .trailing)
+            .padding(.trailing, 10)
 
             Color.clear.frame(width: self.notchWidth)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(peek.title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .lineLimit(1)
+            HStack(spacing: 5) {
+                if !peek.usesArtwork {
+                    Image(systemName: peek.symbol)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(peek.tint)
+                }
                 Text(peek.subtitle)
                     .font(.system(size: 10))
                     .foregroundStyle(.white.opacity(0.55))
                     .lineLimit(1)
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 12)
+            .frame(width: half - 10, alignment: .leading)
+            .padding(.leading, 10)
         }
         .foregroundStyle(.white)
-        .padding(.top, self.notchHeight + 4)
-        .padding(.horizontal, 34)
+        .frame(height: self.notchHeight + 26, alignment: .center)
+        .padding(.horizontal, 16)
+        .transition(.scale(scale: 0.9, anchor: .top).combined(with: .opacity))
     }
 
-    // MARK: - Ears
+    // MARK: - Ears    // MARK: - Ears
 
     /// The strip level with the cutout. The tabs live here, split around the camera housing, so the
     /// panel spends no row on them and the dead space beside the notch finally carries something.
@@ -545,7 +559,9 @@ struct NotchView: View {
 
     private func taskRow(_ task: TodoTask) -> some View {
         let done = self.completing.contains(task.id)
-        return HStack(alignment: .top, spacing: 8) {
+        // Everything on one line: a second row of chips doubled the height of every task to repeat
+        // a project name the logo already says.
+        return HStack(spacing: 8) {
             Button { self.complete(task) } label: {
                 ZStack {
                     Circle()
@@ -569,35 +585,44 @@ struct NotchView: View {
             }
             .buttonStyle(.plain)
 
-            // The title gets the line to itself; the tags stack underneath so a long task no longer
-            // has to compete with five chips for the same row.
-            VStack(alignment: .leading, spacing: 3) {
-                Text(task.title)
-                    .font(.system(size: 12))
-                    .lineLimit(1)
-                    .strikethrough(done, color: .white.opacity(0.5))
-                    .foregroundStyle(.white.opacity(done ? 0.4 : 1))
+            Text(task.title)
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .strikethrough(done, color: .white.opacity(0.5))
+                .foregroundStyle(.white.opacity(done ? 0.4 : 1))
+                .contentShape(Rectangle())
+                .onTapGesture { self.onEditTask(task) }
 
-                if self.hasTags(task) {
-                    HStack(spacing: 4) {
-                        if let project = task.project {
-                            self.chip(project + (task.section.map { " · " + $0 } ?? ""), tint: self.tasks.color(of: project))
-                        }
-                        if let type = task.type { self.chip(type, tint: TaskParser.typeTint(type)) }
-                        if let priority = task.priorityLabel {
-                            self.chip(priority, tint: TaskParser.priorityTint(task.priority))
-                        }
-                        if let due = task.dueLabel {
-                            self.chip(due, tint: TaskParser.dueTint(task.due))
-                        }
-                        Spacer(minLength: 0)
+            Spacer(minLength: 6)
+
+            if let priority = task.priority {
+                PriorityMeter(level: priority)
+                    .help(task.priorityLabel ?? "")
+            }
+
+            if let type = task.type {
+                Circle()
+                    .fill(TaskParser.typeTint(type))
+                    .frame(width: 6, height: 6)
+                    .help(type)
+            }
+
+            if let project = task.project {
+                Group {
+                    if let logo = tasks.logo(of: project) {
+                        Image(nsImage: logo)
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fit)
+                    } else {
+                        Image(systemName: self.tasks.symbol(of: project))
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(self.tasks.color(of: project))
                     }
                 }
+                .frame(width: 14, height: 14)
+                .help(project + (task.section.map { " · " + $0 } ?? ""))
             }
-            .contentShape(Rectangle())
-            .onTapGesture { self.onEditTask(task) }
-
-            Spacer(minLength: 4)
 
             if let app = task.app, let url = TaskStore.appURL(named: app) {
                 Button { NSWorkspace.shared.open(url) } label: {
@@ -607,6 +632,13 @@ struct NotchView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Abrir " + app)
+            }
+
+            if let due = task.dueLabel {
+                Text(due)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(TaskParser.dueTint(task.due))
+                    .lineLimit(1)
             }
         }
         .foregroundStyle(.white)
@@ -618,12 +650,19 @@ struct NotchView: View {
         }
     }
 
-    private func hasTags(_ task: TodoTask) -> Bool {
-        task.project != nil || task.type != nil || task.priority != nil || task.due != nil
-    }
-
-    private func chip(_ text: String, tint: Color) -> some View {
-        Text(text)
+    private func chip(_ text: String, tint: Color, symbol: String? = nil, logo: NSImage? = nil) -> some View {
+        HStack(spacing: 3) {
+            if let logo {
+                Image(nsImage: logo)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 10, height: 10)
+            } else if let symbol {
+                Image(systemName: symbol).font(.system(size: 8, weight: .semibold))
+            }
+            Text(text)
+        }
             .font(.system(size: 9, weight: .medium))
             .padding(.horizontal, 6)
             .padding(.vertical, 1.5)
@@ -718,7 +757,7 @@ struct NotchView: View {
         }
     }
 
-    private func calendarNotice(_ text: String) -> some View {
+    private func calendarNotice(_ text: LocalizedStringKey) -> some View {
         Text(text)
             .font(.system(size: 10))
             .foregroundStyle(.white.opacity(0.5))
@@ -881,22 +920,41 @@ struct NotchView: View {
 
     private var configTab: some View {
         VStack(alignment: .leading, spacing: 8) {
-            self.toggleRow("Recordar la última pestaña", isOn: self.$settings.rememberLastTab)
-            self.toggleRow("Avisar al cambiar de canción", isOn: self.$settings.peekOnTrackChange)
-            self.toggleRow("Ocultar de capturas de pantalla", isOn: self.$settings.hideFromCapture)
+            // Scrolls so adding a toggle never pushes the button off the panel again.
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 8) {
+                    self.toggleRow("Recordar la última pestaña", isOn: self.$settings.rememberLastTab)
+                    self.toggleRow("Avisar al cambiar de canción", isOn: self.$settings.peekOnTrackChange)
+                    self.toggleRow("Ocultar de capturas de pantalla", isOn: self.$settings.hideFromCapture)
+                    self.toggleRow("Guardar los dictados en el portapapeles", isOn: self.$settings.ingestDictations)
 
-            HStack(spacing: 8) {
-                Text("Espera para abrir")
-                    .font(.system(size: 11))
-                Slider(value: self.$settings.hoverDelay, in: 0.05 ... 0.6)
-                    .controlSize(.mini)
-                    .frame(width: 130)
-                Text(String(format: "%.2fs", self.settings.hoverDelay))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.5))
+                    HStack(spacing: 8) {
+                        Text("Espera para abrir")
+                            .font(.system(size: 11))
+                        Slider(value: self.$settings.hoverDelay, in: 0.05 ... 0.6)
+                            .controlSize(.mini)
+                            .frame(width: 120)
+                        Text(String(format: "%.2fs", self.settings.hoverDelay))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                }
+                .padding(.bottom, 4)
             }
-
-            Spacer(minLength: 0)
+            .scrollBounceBehavior(.basedOnSize)
+            // Same fade the agenda and the session list use: a row cut by a hard edge reads as a
+            // bug, one that dissolves reads as "there is more".
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.82),
+                        .init(color: .black.opacity(0), location: 1),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
 
             Button {
                 self.onCollapse()
@@ -916,9 +974,7 @@ struct NotchView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The system switch renders desaturated here: the notch panel refuses key status by design, so
-    /// AppKit paints its controls as an inactive window's. This one owns its colour.
-    private func toggleRow(_ title: String, isOn: Binding<Bool>) -> some View {
+    private func toggleRow(_ title: LocalizedStringKey, isOn: Binding<Bool>) -> some View {
         Button {
             isOn.wrappedValue.toggle()
         } label: {
@@ -972,8 +1028,6 @@ struct NotchView: View {
                                 self.thumbnails.forget(url)
                             }
                         }
-                        // Says the shelf still takes more without stealing a row from the files.
-                        self.addHint
                     }
                     .padding(.horizontal, 1)
                 }
@@ -1004,21 +1058,25 @@ struct NotchView: View {
             .frame(height: 92)
             .animation(.easeOut(duration: 0.15), value: self.state.dropTargeted)
     }
+}
 
-    private var addHint: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .strokeBorder(
-                .white.opacity(self.state.dropTargeted ? 0.5 : 0.14),
-                style: StrokeStyle(lineWidth: 1, dash: [4, 3])
-            )
-            .overlay(
-                Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(self.state.dropTargeted ? 0.8 : 0.3))
-            )
-            .frame(width: 46, height: 80)
+/// Three bars, filled by how urgent it is. A coloured label said the same thing in five times the
+/// width, and at a glance you read the shape before you read the word.
+private struct PriorityMeter: View {
+    let level: Int
+
+    var body: some View {
+        let filled = max(0, 5 - self.level)
+        let tint = TaskParser.priorityTint(self.level)
+        HStack(alignment: .bottom, spacing: 1.5) {
+            ForEach(1 ... 4, id: \.self) { bar in
+                RoundedRectangle(cornerRadius: 0.8)
+                    .fill(bar <= filled ? AnyShapeStyle(tint) : AnyShapeStyle(.white.opacity(0.16)))
+                    .frame(width: 2, height: 3 + CGFloat(bar) * 2.2)
+            }
+        }
+        .frame(height: 12, alignment: .bottom)
     }
-
 }
 
 private struct ShelfChip: View {
@@ -1062,7 +1120,6 @@ private struct ShelfChip: View {
             }
             .buttonStyle(.plain)
             .opacity(self.hovered ? 1 : 0)
-            .offset(x: 3, y: -2)
         }
         .onHover { self.hovered = $0 }
         // Dragging out hands the real file to the destination app.

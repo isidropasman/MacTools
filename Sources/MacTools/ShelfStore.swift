@@ -48,7 +48,13 @@ final class ShelfStore: ObservableObject {
 
         do {
             try FileManager.default.copyItem(at: source, to: destination)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+            // A directory needs its execute bit or nothing can traverse it, including the delete
+            // that empties the shelf.
+            let isDirectory = (try? destination.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: isDirectory ? 0o700 : 0o600],
+                ofItemAtPath: destination.path
+            )
             self.reload()
             return true
         } catch {
@@ -57,13 +63,31 @@ final class ShelfStore: ObservableObject {
     }
 
     func remove(_ url: URL) {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
         try? FileManager.default.removeItem(at: url)
         self.reload()
     }
 
     func clear() {
-        for item in self.items { try? FileManager.default.removeItem(at: item) }
+        // Sweeps the folder rather than the list: anything the list failed to show still has to go.
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: Self.directory,
+            includingPropertiesForKeys: nil,
+            options: []
+        )) ?? []
+        for item in contents {
+            // Folders copied by older builds landed without their execute bit, which made them
+            // impossible to traverse and so impossible to delete.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: item.path)
+            try? FileManager.default.removeItem(at: item)
+        }
         self.reload()
+    }
+
+    var totalBytes: Int64 {
+        self.items.reduce(0) { total, url in
+            Int64((try? url.resourceValues(forKeys: [.totalFileSizeKey]).totalFileSize) ?? 0) + total
+        }
     }
 
     static func icon(for url: URL) -> NSImage {

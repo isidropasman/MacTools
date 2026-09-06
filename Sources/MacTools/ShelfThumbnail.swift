@@ -33,7 +33,14 @@ final class ShelfThumbnails: ObservableObject {
                 guard let self else { return }
                 self.pending.remove(url.path)
                 guard let representation else { return }
-                self.images[url.path] = NSImage(cgImage: representation.cgImage, size: size)
+                // Quick Look answers inside the requested box but keeps the file's aspect ratio.
+                // Forcing the square size onto it is what stretched every non-square thumbnail.
+                let image = representation.cgImage
+                let ratio = CGFloat(image.width) / CGFloat(image.height)
+                let fitted = ratio > 1
+                    ? CGSize(width: size.width, height: size.width / ratio)
+                    : CGSize(width: size.height * ratio, height: size.height)
+                self.images[url.path] = NSImage(cgImage: image, size: fitted)
             }
         }
     }

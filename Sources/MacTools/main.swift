@@ -24,6 +24,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var calendar: CalendarManager?
     private var tasks: TaskStore?
     private var sessions: SessionStore?
+    private var fluid: FluidVoiceControl?
+    private var setup: Setup?
+    private var connectors: Connectors?
+    private var welcomeWindow: NSWindow?
     private var listener: LocalListener?
     private var quickAdd: QuickAddController?
     private var cancellables = Set<AnyCancellable>()
@@ -88,6 +92,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.sessions = sessions
 
         // The Chrome extension POSTs here; extensions cannot write files themselves.
+        let fluid = FluidVoiceControl()
+        self.fluid = fluid
+        let connectors = Connectors()
+        self.connectors = connectors
+        self.setup = Setup(calendar: calendar, fluid: fluid, connectors: connectors)
+
         let listener = LocalListener()
         listener.start()
         self.listener = listener
@@ -112,6 +122,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.buildStatusItem()
         self.registerHotKeys()
 
+        // First run opens the guide instead of leaving a menu bar icon and no explanation.
+        if !Settings.shared.welcomeShown {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.openWelcome() }
+        }
     }
 
     private func registerHotKeys() {
@@ -149,7 +163,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshMenuTitles() {
         guard let items = statusItem?.menu?.items else { return }
-        for (index, tool) in [Tool.history, .quickAdd, .projects].enumerated() {
+        for (offset, tool) in [Tool.history, .quickAdd, .projects].enumerated() {
+            let index = offset + 2
             guard items.indices.contains(index) else { continue }
             let shortcut = Settings.shared.shortcut(for: tool).map { "  " + Settings.shared.display($0) } ?? ""
             items[index].title = self.menuTitle(tool) + shortcut
@@ -182,13 +197,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = "MacTools"
         // Without this the window stays on whatever Space it was first opened in.
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-        let hosting = NSHostingView(rootView: SettingsView(settings: Settings.shared, calendar: self.calendar ?? CalendarManager(), sessions: self.sessions ?? SessionStore()))
+        let hosting = NSHostingView(rootView: SettingsView(
+            settings: Settings.shared,
+            calendar: self.calendar ?? CalendarManager(),
+            sessions: self.sessions ?? SessionStore(),
+            tasks: self.tasks ?? TaskStore(),
+            setup: self.setup ?? Setup(calendar: self.calendar ?? CalendarManager(), fluid: self.fluid ?? FluidVoiceControl(), connectors: self.connectors ?? Connectors()),
+            connectors: self.connectors ?? Connectors(),
+            shelf: self.shelf ?? ShelfStore(),
+            fluid: self.fluid ?? FluidVoiceControl()
+        ))
         window.contentView = hosting
-        window.setContentSize(NSSize(width: 720, height: 480))
-        window.contentMinSize = NSSize(width: 640, height: 400)
+        window.setContentSize(NSSize(width: 780, height: 520))
+        window.contentMinSize = NSSize(width: 700, height: 440)
         window.center()
         window.isReleasedWhenClosed = false
         self.settingsWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func openWelcome() {
+        guard let setup else { return }
+        if let welcomeWindow {
+            welcomeWindow.center()
+            welcomeWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let controller = NSHostingController(rootView: WelcomeView(setup: setup) { [weak self] in
+            Settings.shared.welcomeShown = true
+            self?.welcomeWindow?.performClose(nil)
+        })
+        controller.sizingOptions = [.preferredContentSize]
+        let window = NSWindow(contentViewController: controller)
+        window.styleMask = [.titled, .closable, .fullSizeContentView]
+        window.titlebarAppearsTransparent = true
+        window.title = ""
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        window.isReleasedWhenClosed = false
+        window.center()
+        self.welcomeWindow = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -228,6 +277,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image = MenuBarIcon.make()
 
         let menu = NSMenu()
+        menu.addItem(withTitle: "Guía de inicio", action: #selector(self.openWelcome), keyEquivalent: "")
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Abrir historial", action: #selector(self.openPanel), keyEquivalent: "")
         menu.addItem(withTitle: "Nueva tarea", action: #selector(self.openQuickAdd), keyEquivalent: "")
         menu.addItem(withTitle: "Proyectos y secciones…", action: #selector(self.openProjects), keyEquivalent: "")

@@ -22,6 +22,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/MacTools "$APP/Contents/MacOS/MacTools"
 cp MacTools.icns "$APP/Contents/Resources/MacTools.icns"
 
+# Los hooks y la extension viajan dentro de la app: sin esto el boton de instalar conectores
+# depende de que el repo siga en el disco de quien la usa.
+cp -R llmpet/hooks "$APP/Contents/Resources/hooks"
+cp -R llmpet/extension "$APP/Contents/Resources/chrome-extension"
+cp -R Resources/en.lproj Resources/es.lproj "$APP/Contents/Resources/"
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -31,6 +37,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 	<!-- El identificador se queda: cambiarlo huerfana los permisos de TCC y las preferencias
 	     guardadas, que es exactamente lo que costo semanas arreglar. -->
 	<key>CFBundleIdentifier</key><string>dev.isidropasman.pila</string>
+	<key>CFBundleDevelopmentRegion</key><string>es</string>
+	<key>CFBundleLocalizations</key><array><string>es</string><string>en</string></array>
 	<key>CFBundleName</key><string>MacTools</string>
 	<key>CFBundleDisplayName</key><string>MacTools</string>
 	<key>CFBundleIconFile</key><string>MacTools</string>

@@ -48,7 +48,7 @@ final class NotchState: ObservableObject {
     /// feel like it was breathing at you.
     var contentHeight: CGFloat { 178 }
 
-    static let peekHeight: CGFloat = 78
+    static let peekHeight: CGFloat = 66
     /// The window is fixed at this size and never resized; only the content inside it grows.
     static let windowHeight: CGFloat = 190
     static let windowWidth: CGFloat = 520

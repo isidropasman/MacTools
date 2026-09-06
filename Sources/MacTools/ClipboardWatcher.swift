@@ -70,7 +70,11 @@ final class ClipboardWatcher {
         if let data = imageData(from: types) {
             let thumbnail = Self.thumbnail(from: data.bytes)
             if self.store.upsertImage(data: data.bytes, fileExtension: data.ext, thumbnail: thumbnail, sourceApp: app) {
-                self.store.enforceRetention(maxImages: Settings.maxImagesNow, maxBytes: Settings.maxImageBytesNow)
+                self.store.enforceRetention(
+                    maxImages: Settings.maxImagesNow,
+                    maxBytes: Settings.maxImageBytesNow,
+                    maxTexts: Settings.maxTextsNow
+                )
             }
             self.onChange()
             return

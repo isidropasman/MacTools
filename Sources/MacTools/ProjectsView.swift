@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The catalogue as a table: the token syntax is fast once you know it, but reorganising projects
 /// by retyping "#plexo/code" on every task is not editing, it is data entry.
@@ -19,10 +20,10 @@ struct ProjectsView: View {
                 TextField("Nuevo proyecto", text: self.$newProject)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 12).padding(.vertical, 7)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 12))
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.quaternary))
                     .onSubmit(self.addProject)
                 Button("Agregar", action: self.addProject)
-                    .buttonStyle(.glass)
+                    .buttonStyle(.bordered)
                     .disabled(TaskStore.normalize(self.newProject).isEmpty)
             }
             .padding(14)
@@ -90,7 +91,15 @@ struct ProjectsView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
 
-                ColorSwatch(color: color) { self.tasks.setColor($0, for: project) }
+                ProjectBadge(
+                    symbol: self.tasks.symbol(of: project),
+                    logo: self.tasks.logo(of: project),
+                    color: color,
+                    pickColor: { self.tasks.setColor($0, for: project) },
+                    pickSymbol: { self.tasks.setSymbol($0, for: project) },
+                    pickLogo: { self.tasks.setLogo(from: $0, for: project) },
+                    clearLogo: { self.tasks.removeLogo(for: project) }
+                )
 
                 EditableName(name: project, bold: true) { self.tasks.renameProject(project, to: $0) }
 
@@ -159,50 +168,121 @@ struct ProjectsView: View {
 
 /// A Menu whose label is a bare Circle collapsed to nothing, so the colour was unreachable. An
 /// explicit swatch with a palette popover says what it does without a hover.
-private struct ColorSwatch: View {
+private struct ProjectBadge: View {
+    let symbol: String
+    let logo: NSImage?
     let color: Color
-    let pick: (String?) -> Void
+    let pickColor: (String?) -> Void
+    let pickSymbol: (String?) -> Void
+    let pickLogo: (URL) -> Bool
+    let clearLogo: () -> Void
 
     @State private var showing = false
+    @State private var failed = false
 
     var body: some View {
         Button { self.showing = true } label: {
-            Circle()
-                .fill(self.color)
-                .frame(width: 13, height: 13)
-                .overlay(Circle().strokeBorder(.white.opacity(0.45), lineWidth: 1))
-                .padding(2)
-                .contentShape(Circle())
+            Group {
+                if let logo {
+                    Image(nsImage: logo)
+                        .resizable()
+                        .interpolation(.high)
+                        .aspectRatio(contentMode: .fit)
+                        .padding(2)
+                } else {
+                    Image(systemName: self.symbol)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(width: 22, height: 22)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(self.logo == nil ? AnyShapeStyle(self.color.gradient) : AnyShapeStyle(.quaternary))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        .help("Color del proyecto")
+        .help("Logo y color del proyecto")
         .popover(isPresented: self.$showing, arrowEdge: .bottom) {
-            VStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Color").font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     ForEach(ProjectPalette.order, id: \.self) { name in
-                        Button {
-                            self.pick(name)
-                            self.showing = false
-                        } label: {
+                        Button { self.pickColor(name) } label: {
                             Circle()
                                 .fill(ProjectPalette.colors[name] ?? .blue)
-                                .frame(width: 20, height: 20)
+                                .frame(width: 18, height: 18)
                                 .overlay(Circle().strokeBorder(.white.opacity(0.35), lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                         .help(name.capitalized)
                     }
+                    Button("Auto") { self.pickColor(nil) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
                 }
-                Button("Automático") {
-                    self.pick(nil)
-                    self.showing = false
+
+                Divider()
+
+                HStack {
+                    Text("Imagen").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Elegir…", action: self.chooseFile)
+                        .controlSize(.small)
+                    if self.logo != nil {
+                        Button("Quitar") { self.clearLogo() }
+                            .controlSize(.small)
+                    }
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                if self.failed {
+                    Text("No pude leer esa imagen. PNG, JPG, TIFF, HEIC y PDF andan; SVG no lo abre macOS.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Text("Arrastrá una imagen acá o elegí un archivo. Reemplaza al símbolo.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+
+                Divider()
+
+                Text("Símbolo").font(.caption).foregroundStyle(.secondary)
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(26), spacing: 6), count: 10), spacing: 6) {
+                    ForEach(ProjectSymbols.all, id: \.self) { name in
+                        Button { self.pickSymbol(name) } label: {
+                            Image(systemName: name)
+                                .font(.system(size: 12))
+                                .frame(width: 24, height: 24)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(name == self.symbol ? AnyShapeStyle(self.color.opacity(0.35)) : AnyShapeStyle(.quaternary))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(width: 314)
             }
-            .padding(12)
+            .padding(14)
+            .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                guard let provider = providers.first else { return false }
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url else { return }
+                    Task { @MainActor in self.failed = !self.pickLogo(url) }
+                }
+                return true
+            }
         }
+    }
+
+    private func chooseFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image, .pdf]
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Usar"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        self.failed = !self.pickLogo(url)
     }
 }
 
@@ -221,7 +301,7 @@ private struct EditableName: View {
                 TextField("", text: self.$draft)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 8).padding(.vertical, 3)
-                    .glassEffect(.regular, in: .capsule)
+                    .background(Capsule().fill(.quaternary))
                     .frame(maxWidth: 180)
                     .onSubmit {
                         self.commit(self.draft)

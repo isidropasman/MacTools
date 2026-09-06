@@ -13,6 +13,8 @@ private final class HoverView: NSView {
     var dragging = false {
         didSet { self.updateTrackingAreas() }
     }
+    var onDropTargeted: ((Bool) -> Void)?
+    var onDropFiles: (([URL]) -> Void)?
 
     /// Region that counts as "the notch" while collapsed, in this view's coordinates.
     var notchRect: NSRect = .zero {
@@ -27,6 +29,36 @@ private final class HoverView: NSView {
     }
 
     private var tracking: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        self.registerForDraggedTypes([.fileURL])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        self.onDropTargeted?(true)
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation { .copy }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) {
+        self.onDropTargeted?(false)
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        self.onDropTargeted?(false)
+        let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] ?? []
+        guard !urls.isEmpty else { return false }
+        self.onDropFiles?(urls)
+        return true
+    }
 
     private var activeRect: NSRect {
         if self.expanded || self.dragging { return self.bounds }
@@ -62,55 +94,9 @@ private final class HoverView: NSView {
     override func mouseExited(with event: NSEvent) { self.onExit?() }
 }
 
-/// Drops are handled by the window, not by a view. A view destination is found through hitTest,
-/// and the hover view has to refuse everything outside the cutout so it does not eat clicks on the
-/// menu bar, which meant a dragged file never reached it.
 private final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
-
-    /// Region that accepts a drag while the panel is closed, in window coordinates.
-    var closedDropRect: NSRect = .zero
-    var isOpen: (() -> Bool)?
-    var onDropTargeted: ((Bool) -> Void)?
-    var onDropFiles: (([URL]) -> Void)?
-
-    private func accepts(_ sender: any NSDraggingInfo) -> Bool {
-        guard sender.draggingPasteboard.canReadObject(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) else { return false }
-        // Closed, the panel is invisible: only the strip over the cutout may steal a drop from
-        // whatever is underneath. Open, the whole panel is a target.
-        return self.isOpen?() == true || self.closedDropRect.contains(sender.draggingLocation)
-    }
-
-    func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        guard self.accepts(sender) else { return [] }
-        self.onDropTargeted?(true)
-        return .copy
-    }
-
-    func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        guard self.accepts(sender) else { return [] }
-        self.onDropTargeted?(true)
-        return .copy
-    }
-
-    func draggingExited(_ sender: (any NSDraggingInfo)?) {
-        self.onDropTargeted?(false)
-    }
-
-    func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        self.onDropTargeted?(false)
-        let urls = sender.draggingPasteboard.readObjects(
-            forClasses: [NSURL.self],
-            options: [.urlReadingFileURLsOnly: true]
-        ) as? [URL] ?? []
-        guard !urls.isEmpty else { return false }
-        self.onDropFiles?(urls)
-        return true
-    }
 }
 
 @MainActor
@@ -130,6 +116,8 @@ final class NotchController {
     private var lastTrackKey: String?
     private var lastCharging: Bool?
     private var cancellables = Set<AnyCancellable>()
+    private var dragMonitor: Any?
+    private var armedDisplay: CGDirectDisplayID?
 
     private let media: MediaController
     private let shelf: ShelfStore
@@ -142,6 +130,42 @@ final class NotchController {
     var onQuickAdd: (() -> Void)?
     var onEditTask: ((TodoTask) -> Void)?
     var onOpenSettings: (() -> Void)?
+
+    /// The surface whose drop strip the pointer is over, if any. Open panels take the whole frame.
+    private func surfaceUnderDrag(at point: NSPoint) -> Surface? {
+        self.surfaces.first { surface in
+            let id = NotchGeometry.displayID(of: surface.screen)
+            if self.state.expandedScreen == id { return surface.panel.frame.contains(point) }
+            let trigger = NotchGeometry.trigger(on: surface.screen)
+            // The whole width of the panel at menu-bar height: aiming a dragged file at the cutout
+            // exactly is hard, and nothing under that strip accepts drops anyway.
+            return NSRect(
+                x: surface.panel.frame.minX,
+                y: trigger.minY - 12,
+                width: surface.panel.frame.width,
+                height: trigger.height + 12
+            ).contains(point)
+        }
+    }
+
+    private func setDragArmed(_ surface: Surface?) {
+        let id = surface.map { NotchGeometry.displayID(of: $0.screen) }
+        guard id != self.armedDisplay else { return }
+        self.armedDisplay = id
+
+        for other in self.surfaces {
+            other.hover.dragging = NotchGeometry.displayID(of: other.screen) == id
+        }
+
+        guard let surface else {
+            self.state.dropTargeted = false
+            self.scheduleCollapse()
+            return
+        }
+        self.collapseTask?.cancel()
+        self.state.tab = .shelf
+        self.state.expandedScreen = NotchGeometry.displayID(of: surface.screen)
+    }
 
     /// Opens straight onto a tab, which is what a per-tool shortcut is asking for.
     func show(_ tab: NotchTab) {
@@ -189,6 +213,25 @@ final class NotchController {
 
     func install() {
         self.rebuild()
+
+
+        // A collapsed panel has to refuse hit tests outside the cutout or it eats clicks on the
+        // menu bar, and AppKit finds drag destinations by hit testing — so a dragged file never
+        // reached it. This watches the drag from outside and opens the door only while one is
+        // actually over the strip.
+        self.dragMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) {
+            [weak self] event in
+            guard let self else { return }
+            if event.type == .leftMouseUp {
+                self.setDragArmed(nil)
+                return
+            }
+            guard NSPasteboard(name: .drag).canReadObject(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+            ) else { return }
+            self.setDragArmed(self.surfaceUnderDrag(at: NSEvent.mouseLocation))
+        }
 
 
         // Plugging in or unplugging a display invalidates every panel's geometry.
@@ -267,17 +310,16 @@ final class NotchController {
     /// Confirms a capture where the task now lives, so the quick add can close without leaving you
     /// wondering whether it took.
     func announce(_ task: TodoTask, on screen: NSScreen?) {
+        // Two items at most: the strip only has half a panel and a long line just truncates.
         var detail: [String] = []
-        if let project = task.project {
-            detail.append(project + (task.section.map { " · " + $0 } ?? ""))
-        }
         if let due = task.dueLabel { detail.append(due) }
-        if let type = task.type { detail.append(type) }
+        if let project = task.project { detail.append(project) }
+        else if let type = task.type { detail.append(type) }
 
         self.peek(
             NotchState.Peek(
                 title: task.title,
-                subtitle: detail.isEmpty ? "Tarea agregada" : detail.joined(separator: "  ·  "),
+                subtitle: detail.isEmpty ? "Tarea agregada" : detail.joined(separator: " · "),
                 symbol: "checkmark.circle.fill",
                 usesArtwork: false,
                 tint: task.project.map { self.tasks.color(of: $0) } ?? .green
@@ -346,32 +388,11 @@ final class NotchController {
         container.slack = NotchGeometry.slack(on: screen)
         container.onEnter = { [weak self] in self?.expand(on: screen) }
         container.onExit = { [weak self] in self?.scheduleCollapse() }
-        panel.registerForDraggedTypes([.fileURL])
-        // The full width of the strip level with the menu bar. Aiming a dragged file at the cutout
-        // exactly is hard, and nothing under that strip accepts drops anyway.
-        panel.closedDropRect = NSRect(
-            x: 0,
-            y: container.notchRect.minY - 12,
-            width: size.width,
-            height: container.notchRect.height + 12
-        )
-        panel.isOpen = { [weak self] in
-            self?.state.expandedScreen == NotchGeometry.displayID(of: screen)
-        }
-        panel.onDropTargeted = { [weak self] active in
+        container.onDropTargeted = { [weak self] active in
             guard let self else { return }
-            guard self.state.dropTargeted != active else { return }
             self.state.dropTargeted = active
-            container.dragging = active
-            if active {
-                self.collapseTask?.cancel()
-                self.state.tab = .shelf
-                self.state.expandedScreen = NotchGeometry.displayID(of: screen)
-            } else {
-                self.scheduleCollapse()
-            }
         }
-        panel.onDropFiles = { [weak self] urls in
+        container.onDropFiles = { [weak self] urls in
             guard let self else { return }
             for url in urls { self.shelf.add(url) }
             self.state.tab = .shelf

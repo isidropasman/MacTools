@@ -2,6 +2,20 @@ import AppKit
 import Combine
 import SwiftUI
 
+/// A logo without shipping an image picker: SF Symbols tint with the project colour, scale to any
+/// size and cost one string in the catalogue.
+enum ProjectSymbols {
+    static let all = [
+        "circle.fill", "briefcase.fill", "chart.line.uptrend.xyaxis", "dollarsign.circle.fill",
+        "cart.fill", "megaphone.fill", "person.2.fill", "building.2.fill",
+        "hammer.fill", "wrench.and.screwdriver.fill", "chevron.left.forwardslash.chevron.right",
+        "cpu", "server.rack", "paintbrush.fill", "pencil.and.ruler.fill", "camera.fill",
+        "book.fill", "graduationcap.fill", "airplane", "house.fill", "heart.fill", "star.fill",
+        "bolt.fill", "flame.fill", "leaf.fill", "globe.americas.fill", "puzzlepiece.fill",
+        "target", "flag.fill", "gearshape.fill",
+    ]
+}
+
 enum ProjectPalette {
     static let order = ["azul", "violeta", "verde", "naranja", "rosa", "turquesa", "amarillo", "rojo"]
 
@@ -87,6 +101,9 @@ final class TaskStore: ObservableObject {
     struct Project: Codable, Equatable {
         var sections: [String] = []
         var color: String?
+        var symbol: String?
+        /// Filename inside the logos folder. A real logo wins over the SF Symbol.
+        var logo: String?
     }
 
     /// Projects used to exist only as a side effect of some task mentioning them, so an empty
@@ -95,6 +112,7 @@ final class TaskStore: ObservableObject {
 
     private let url = Store.supportDirectory.appendingPathComponent("tasks.json")
     private let catalogURL = Store.supportDirectory.appendingPathComponent("projects.json")
+    private var logoCache: [String: NSImage] = [:]
     private let notifier = TaskNotifier()
 
     init() {
@@ -192,6 +210,8 @@ final class TaskStore: ObservableObject {
         var merged = self.catalog[new] ?? Project()
         merged.sections = Array(Set(merged.sections + (self.catalog[old]?.sections ?? [])))
         merged.color = merged.color ?? self.catalog[old]?.color
+        merged.symbol = merged.symbol ?? self.catalog[old]?.symbol
+        merged.logo = merged.logo ?? self.catalog[old]?.logo
         self.catalog[new] = merged
         self.catalog[old] = nil
         for index in self.tasks.indices where self.tasks[index].project == old {
@@ -204,6 +224,8 @@ final class TaskStore: ObservableObject {
     /// Deleting a project leaves its tasks alone but unfiled; losing a task to a bookkeeping change
     /// would be a far worse surprise than an untagged row.
     func removeProject(_ name: String) {
+        self.removeLogoFile(of: name)
+        self.logoCache.removeValue(forKey: name)
         self.catalog[name] = nil
         for index in self.tasks.indices where self.tasks[index].project == name {
             self.tasks[index].project = nil
@@ -245,6 +267,84 @@ final class TaskStore: ObservableObject {
         }
         self.save()
         self.saveCatalog()
+    }
+
+    static let logoDirectory = Store.supportDirectory.appendingPathComponent("logos", isDirectory: true)
+
+    /// Re-encoded to PNG at 256pt instead of copied as-is: it normalises every format NSImage can
+    /// read and keeps a 4000px export from sitting in the support folder.
+    @discardableResult
+    func setLogo(from source: URL, for project: String) -> Bool {
+        guard let image = NSImage(contentsOf: source) else { return false }
+
+        let side: CGFloat = 256
+        let ratio = image.size.width > 0 ? image.size.height / image.size.width : 1
+        let target = ratio > 1
+            ? NSSize(width: side / ratio, height: side)
+            : NSSize(width: side, height: side * ratio)
+
+        let resized = NSImage(size: target)
+        resized.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: NSRect(origin: .zero, size: target))
+        resized.unlockFocus()
+
+        guard let tiff = resized.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:])
+        else { return false }
+
+        try? FileManager.default.createDirectory(
+            at: Self.logoDirectory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        let name = UUID().uuidString + ".png"
+        guard (try? png.write(to: Self.logoDirectory.appendingPathComponent(name), options: .atomic)) != nil
+        else { return false }
+
+        self.removeLogoFile(of: project)
+        var entry = self.catalog[project] ?? Project()
+        entry.logo = name
+        self.catalog[project] = entry
+        self.logoCache.removeValue(forKey: project)
+        self.saveCatalog()
+        return true
+    }
+
+    func removeLogo(for project: String) {
+        self.removeLogoFile(of: project)
+        var entry = self.catalog[project] ?? Project()
+        entry.logo = nil
+        self.catalog[project] = entry
+        self.logoCache.removeValue(forKey: project)
+        self.saveCatalog()
+    }
+
+    private func removeLogoFile(of project: String) {
+        guard let name = catalog[project]?.logo else { return }
+        try? FileManager.default.removeItem(at: Self.logoDirectory.appendingPathComponent(name))
+    }
+
+    func logo(of project: String?) -> NSImage? {
+        guard let project else { return nil }
+        if let cached = logoCache[project] { return cached }
+        guard let name = catalog[project]?.logo,
+              let image = NSImage(contentsOf: Self.logoDirectory.appendingPathComponent(name))
+        else { return nil }
+        self.logoCache[project] = image
+        return image
+    }
+
+    func setSymbol(_ symbol: String?, for project: String) {
+        var entry = self.catalog[project] ?? Project()
+        entry.symbol = symbol
+        self.catalog[project] = entry
+        self.saveCatalog()
+    }
+
+    func symbol(of project: String?) -> String {
+        project.flatMap { self.catalog[$0]?.symbol } ?? "circle.fill"
     }
 
     func setColor(_ color: String?, for project: String) {

@@ -539,8 +539,11 @@ final class Store {
 
     // MARK: - Retention
 
-    /// Text is never evicted. Images are trimmed to the newest `maxImages` and then down to `maxImageBytes`.
-    func enforceRetention(maxImages: Int, maxBytes: Int64) {
+    /// Images are trimmed to the newest `maxImages` and then down to `maxImageBytes`; text to the
+    /// newest `maxTexts`. Pinned rows survive both.
+    func enforceRetention(maxImages: Int, maxBytes: Int64, maxTexts: Int) {
+        self.trimText(maxTexts)
+
         let doomed = self.queue.sync { () -> [Int64] in
             var statement: OpaquePointer?
             let sql = """
@@ -561,6 +564,29 @@ final class Store {
                 if index > maxImages || runningBytes > maxBytes {
                     ids.append(id)
                 }
+            }
+            return ids
+        }
+
+        for id in doomed { self.delete(id: id) }
+    }
+
+    private func trimText(_ limit: Int) {
+        let doomed = self.queue.sync { () -> [Int64] in
+            var statement: OpaquePointer?
+            let sql = """
+            SELECT id FROM items
+            WHERE kind = 'text' AND pinned = 0
+            ORDER BY updated_at DESC
+            LIMIT -1 OFFSET ?;
+            """
+            guard sqlite3_prepare_v2(self.db, sql, -1, &statement, nil) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(statement) }
+            sqlite3_bind_int(statement, 1, Int32(max(limit, 0)))
+
+            var ids: [Int64] = []
+            while sqlite3_step(statement) == SQLITE_ROW {
+                ids.append(sqlite3_column_int64(statement, 0))
             }
             return ids
         }

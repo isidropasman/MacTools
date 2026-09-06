@@ -2,6 +2,11 @@ import AppKit
 import Carbon.HIToolbox
 import Combine
 
+extension Notification.Name {
+    /// Jumps the settings window to the connector list from anywhere that mentions them.
+    static let mactoolsShowAgents = Notification.Name("MacToolsShowAgents")
+}
+
 @MainActor
 final class Settings: ObservableObject {
     static let shared = Settings()
@@ -13,6 +18,7 @@ final class Settings: ObservableObject {
         static let modifiers = "HotKeyModifiers"
         static let pasteOnPick = "PasteOnPick"
         static let maxImages = "MaxImages"
+        static let maxTexts = "MaxTexts"
         static let maxImageGB = "MaxImageGB"
         static let ingestDictations = "IngestDictations"
         static let useNotch = "UseNotch"
@@ -20,6 +26,8 @@ final class Settings: ObservableObject {
         static let hideFromCapture = "HideFromCapture"
         static let hoverDelay = "HoverDelay"
         static let rememberLastTab = "RememberLastTab"
+        static let welcomeShown = "WelcomeShown"
+        static let language = "AppleLanguages"
         static let lastTab = "LastTab"
     }
 
@@ -100,6 +108,11 @@ final class Settings: ObservableObject {
         didSet { self.defaults.set(self.maxImages, forKey: Key.maxImages) }
     }
 
+    /// The text history used to grow forever. 5000 entries is years of copying.
+    @Published var maxTexts: Int {
+        didSet { self.defaults.set(self.maxTexts, forKey: Key.maxTexts) }
+    }
+
     @Published var maxImageGB: Double {
         didSet { self.defaults.set(self.maxImageGB, forKey: Key.maxImageGB) }
     }
@@ -137,6 +150,25 @@ final class Settings: ObservableObject {
         didSet { self.defaults.set(self.rememberLastTab, forKey: Key.rememberLastTab) }
     }
 
+    /// Overrides the app's language without touching the system one. AppleLanguages is read by
+    /// the loader at launch, so a change only lands on the next start.
+    var language: String {
+        get { (self.defaults.stringArray(forKey: Key.language)?.first).map { String($0.prefix(2)) } ?? "" }
+        set {
+            if newValue.isEmpty {
+                self.defaults.removeObject(forKey: Key.language)
+            } else {
+                self.defaults.set([newValue], forKey: Key.language)
+            }
+            self.objectWillChange.send()
+        }
+    }
+
+    var welcomeShown: Bool {
+        get { self.defaults.bool(forKey: Key.welcomeShown) }
+        set { self.defaults.set(newValue, forKey: Key.welcomeShown) }
+    }
+
     var lastTab: String? {
         get { self.defaults.string(forKey: Key.lastTab) }
         set { self.defaults.set(newValue, forKey: Key.lastTab) }
@@ -154,6 +186,7 @@ final class Settings: ObservableObject {
         self.modifiers = UInt32(self.defaults.object(forKey: Key.modifiers) as? Int ?? (cmdKey | shiftKey))
         self.pasteOnPick = self.defaults.object(forKey: Key.pasteOnPick) as? Bool ?? true
         self.maxImages = self.defaults.object(forKey: Key.maxImages) as? Int ?? 200
+        self.maxTexts = self.defaults.object(forKey: Key.maxTexts) as? Int ?? 5000
         self.maxImageGB = self.defaults.object(forKey: Key.maxImageGB) as? Double ?? 2
         self.ingestDictations = self.defaults.object(forKey: Key.ingestDictations) as? Bool ?? true
         self.useNotch = self.defaults.object(forKey: Key.useNotch) as? Bool ?? true
@@ -172,6 +205,10 @@ final class Settings: ObservableObject {
 
     nonisolated static var peekOnTrackChangeNow: Bool {
         UserDefaults.standard.object(forKey: "PeekOnTrackChange") as? Bool ?? false
+    }
+
+    nonisolated static var maxTextsNow: Int {
+        UserDefaults.standard.object(forKey: "MaxTexts") as? Int ?? 5000
     }
 
     nonisolated static var maxImagesNow: Int {
