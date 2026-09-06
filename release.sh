@@ -14,11 +14,12 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP="MacTools.app"
-VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Contents/Info.plist" 2>/dev/null || echo "0.1.0")
 OUT="dist"
-DMG="$OUT/MacTools-$VERSION.dmg"
 
+# Despues de compilar: leerla antes tomaba la version del build anterior.
 ./build.sh
+VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Contents/Info.plist")
+DMG="$OUT/MacTools-$VERSION.dmg"
 
 rm -rf "$OUT" && mkdir -p "$OUT/stage"
 cp -R "$APP" "$OUT/stage/$APP"
@@ -29,17 +30,31 @@ if [ -n "${MACTOOLS_IDENTITY:-}" ]; then
     codesign --force --deep --options runtime --timestamp \
         --sign "$MACTOOLS_IDENTITY" "$OUT/stage/$APP"
 else
-    cat > "$OUT/stage/LEEME - como abrirla.txt" <<'TXT'
-MacTools no esta firmada con una cuenta de Apple Developer, asi que la primera vez
-macOS avisa que "no se puede comprobar que no contiene malware".
+    # Ad-hoc y no con el certificado local: ese certificado solo existe en la Mac que compila,
+    # y en cualquier otra aparece como una autoridad desconocida.
+    codesign --force --deep --sign - "$OUT/stage/$APP"
 
-Para abrirla:
+    cat > "$OUT/stage/LEEME - como abrirla.txt" <<'TXT'
+MacTools no esta notarizada con una cuenta de Apple Developer, asi que macOS la
+bloquea la primera vez: "Apple no ha podido verificar que no contenga software
+malicioso".
+
+LA FORMA FACIL (recomendada), con Homebrew:
+
+    brew install --cask isidropasman/tap/mactools
+
+Instala y abre sin ningun cartel.
+
+DESDE ESTE DMG:
 
   1. Arrastra MacTools a la carpeta Aplicaciones.
-  2. En Aplicaciones, hace CLIC DERECHO sobre MacTools y elegi "Abrir".
-  3. En el cartel, apreta "Abrir" de nuevo.
+  2. Abrila. Va a aparecer el cartel; apreta "Aceptar".
+  3. Anda a Ajustes del Sistema > Privacidad y Seguridad, baja hasta
+     "Seguridad" y apreta "Abrir igualmente" al lado de MacTools.
+  4. Confirma con "Abrir".
 
-Solo hace falta la primera vez. Despues abre normal.
+Desde macOS 15 el viejo truco del clic derecho ya no alcanza; hay que pasar por
+Ajustes del Sistema. Solo hace falta la primera vez.
 
 Requiere macOS 14 o mas nuevo.
 TXT
