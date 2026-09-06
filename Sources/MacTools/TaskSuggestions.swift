@@ -56,12 +56,20 @@ enum TaskSuggestions {
         }
     }
 
+    static let appDirectories = [
+        "/Applications",
+        "/Applications/Utilities",
+        "/System/Applications",
+        "/System/Applications/Utilities",
+        NSHomeDirectory() + "/Applications",
+    ]
+
     private static var appCache: [String]?
 
-    private static func installedApps() -> [String] {
+    static func installedApps() -> [String] {
         if let appCache { return appCache }
         var names: Set<String> = []
-        for directory in ["/Applications", "/System/Applications", NSHomeDirectory() + "/Applications"] {
+        for directory in Self.appDirectories {
             let contents = (try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? []
             for entry in contents where entry.hasSuffix(".app") {
                 names.insert(String(entry.dropLast(4)))

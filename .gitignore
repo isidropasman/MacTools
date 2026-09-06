@@ -1,10 +1,13 @@
 .build/
+MacTools.app/
+MacTools.iconset/
 Pila.app/
 Pila.iconset/
 .DS_Store
 .gstack/
 
 # Derivado de Tools/make-icon.swift; build.sh lo regenera si falta
+MacTools.icns
 Pila.icns
 
 # llmpet: app de monitoreo de sesiones LLM. Vive acá pero es su propio

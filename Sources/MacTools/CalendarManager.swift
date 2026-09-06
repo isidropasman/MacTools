@@ -134,6 +134,12 @@ final class CalendarManager: ObservableObject {
     }
 
     /// Today only, from now on. A past meeting in the notch is noise.
+    /// Manual refresh from the settings pane, for when you have just added an account.
+    func reloadNow() {
+        self.requestAccess()
+        self.reload()
+    }
+
     private func reload() {
         guard self.access == .granted else { return }
 

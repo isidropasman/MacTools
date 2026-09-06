@@ -3,11 +3,11 @@ import PackageDescription
 
 let package = Package(
     name: "MacTools",
-    platforms: [.macOS("14.0")],
+    platforms: [.macOS("26.0")],
     targets: [
         .executableTarget(
-            name: "Pila",
-            path: "Sources/Pila",
+            name: "MacTools",
+            path: "Sources/MacTools",
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
     ]

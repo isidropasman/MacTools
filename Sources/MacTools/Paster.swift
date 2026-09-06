@@ -2,7 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 
 /// Sends a synthetic Cmd+V to whatever app the user came from.
-/// This is the one feature that needs Accessibility; everything else in Pila works without it.
+/// This is the one feature that needs Accessibility; everything else in MacTools works without it.
 enum Paster {
     static var isTrusted: Bool { AXIsProcessTrusted() }
 

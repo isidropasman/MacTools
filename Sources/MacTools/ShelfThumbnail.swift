@@ -18,12 +18,14 @@ final class ShelfThumbnails: ObservableObject {
         guard !self.pending.contains(url.path) else { return }
         self.pending.insert(url.path)
 
+        // .all lets Quick Look answer with the file-type icon, which then gets scaled up and looks
+        // mushy. Asking for a real thumbnail first, at twice the drawn size, keeps photos readable.
         let scale = NSScreen.main?.backingScaleFactor ?? 2
         let request = QLThumbnailGenerator.Request(
             fileAt: url,
-            size: size,
+            size: CGSize(width: size.width * 2, height: size.height * 2),
             scale: scale,
-            representationTypes: .all
+            representationTypes: [.thumbnail, .lowQualityThumbnail, .icon]
         )
 
         QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { [weak self] representation, _ in

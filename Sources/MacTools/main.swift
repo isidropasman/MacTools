@@ -10,18 +10,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store: Store?
     private var watcher: ClipboardWatcher?
     private var ingestor: FluidVoiceIngestor?
-    private var hotKey: GlobalHotKey?
+    private var hotKeys: [Tool: GlobalHotKey] = [:]
     private var panel: PanelController?
     private var model: HistoryModel?
     private var settingsWindow: NSWindow?
+    private var projectsWindow: NSWindow?
+    /// Closing the catalogue should put you back where you were, not just leave you with nothing.
+    private var projectsCameFromQuickAdd = false
     private var media: MediaController?
     private var notch: NotchController?
     private var shelf: ShelfStore?
     private var battery: BatteryMonitor?
     private var calendar: CalendarManager?
     private var tasks: TaskStore?
+    private var sessions: SessionStore?
+    private var listener: LocalListener?
     private var quickAdd: QuickAddController?
-    private var quickAddHotKey: GlobalHotKey?
     private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -56,9 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onOpenSettings = { [weak self] in self?.openSettings() }
         self.panel = panel
 
-        self.registerHotKey()
         Settings.shared.hotKeyChanged
-            .sink { [weak self] in self?.registerHotKey() }
+            .sink { [weak self] in self?.registerHotKeys() }
             .store(in: &self.cancellables)
 
         let media = MediaController()
@@ -79,37 +82,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let tasks = TaskStore()
         self.tasks = tasks
 
-        let quickAdd = QuickAddController(tasks: tasks)
-        self.quickAdd = quickAdd
-        // Capture has to work from anywhere, not only with the pointer parked on the notch.
-        self.quickAddHotKey = GlobalHotKey(keyCode: UInt32(kVK_ANSI_T), modifiers: UInt32(cmdKey | shiftKey)) { [weak quickAdd] in
-            quickAdd?.toggle()
-        }
-        if self.quickAddHotKey == nil {
-            NSLog("Pila: ⇧⌘T ya está tomado por otra app; queda el menú de la barra")
-        }
+        // What llmpet used to watch from its own floating window.
+        let sessions = SessionStore()
+        sessions.start()
+        self.sessions = sessions
 
-        let notch = NotchController(media: media, shelf: shelf, battery: battery, calendar: calendar, tasks: tasks)
+        // The Chrome extension POSTs here; extensions cannot write files themselves.
+        let listener = LocalListener()
+        listener.start()
+        self.listener = listener
+
+        let quickAdd = QuickAddController(tasks: tasks)
+        quickAdd.onManageProjects = { [weak self] in
+            self?.projectsCameFromQuickAdd = true
+            self?.openProjects()
+        }
+        self.quickAdd = quickAdd
+
+        let notch = NotchController(media: media, shelf: shelf, battery: battery, calendar: calendar, tasks: tasks, sessions: sessions)
         notch.onQuickAdd = { [weak quickAdd] in quickAdd?.show() }
         notch.onEditTask = { [weak quickAdd] task in quickAdd?.show(editing: task) }
+        notch.onOpenSettings = { [weak self] in self?.openSettings() }
+        quickAdd.onTaskAdded = { [weak notch] task, screen in
+            notch?.announce(task, on: screen)
+        }
         notch.install()
         self.notch = notch
 
         self.buildStatusItem()
-        store.enforceRetention(maxImages: Settings.shared.maxImages, maxBytes: Settings.shared.maxImageBytes)
+        self.registerHotKeys()
+
     }
 
-    private func registerHotKey() {
-        let settings = Settings.shared
+    private func registerHotKeys() {
         // Released before re-registering: Carbon refuses a duplicate combo.
-        self.hotKey = nil
-        self.hotKey = GlobalHotKey(keyCode: settings.keyCode, modifiers: settings.modifiers) { [weak self] in
-            self?.panel?.toggle()
+        self.hotKeys.removeAll()
+
+        for tool in Tool.allCases {
+            guard let shortcut = Settings.shared.shortcut(for: tool) else { continue }
+            let hotKey = GlobalHotKey(keyCode: shortcut.key, modifiers: shortcut.modifiers) { [weak self] in
+                self?.run(tool)
+            }
+            if let hotKey {
+                self.hotKeys[tool] = hotKey
+            } else {
+                NSLog("MacTools: no se pudo registrar el atajo de \(tool.title), probablemente ya lo tomó otra app")
+            }
         }
-        if self.hotKey == nil {
-            NSLog("Pila: no se pudo registrar \(settings.shortcutDisplay), probablemente ya lo tomó otra app")
+
+        self.refreshMenuTitles()
+    }
+
+    private func showNotchTab(_ tab: NotchTab) {
+        self.notch?.show(tab)
+    }
+
+    private func run(_ tool: Tool) {
+        switch tool {
+        case .history: self.panel?.toggle()
+        case .quickAdd: self.quickAdd?.toggle()
+        case .projects: self.openProjects()
+        case .sessions: self.showNotchTab(.sessions)
+        case .notch: self.notch?.toggleUnderPointer()
         }
-        self.statusItem?.menu?.items.first?.title = "Abrir historial  \(settings.shortcutDisplay)"
+    }
+
+    private func refreshMenuTitles() {
+        guard let items = statusItem?.menu?.items else { return }
+        for (index, tool) in [Tool.history, .quickAdd, .projects].enumerated() {
+            guard items.indices.contains(index) else { continue }
+            let shortcut = Settings.shared.shortcut(for: tool).map { "  " + Settings.shared.display($0) } ?? ""
+            items[index].title = self.menuTitle(tool) + shortcut
+        }
+    }
+
+    private func menuTitle(_ tool: Tool) -> String {
+        switch tool {
+        case .history: "Abrir historial"
+        case .quickAdd: "Nueva tarea"
+        case .projects: "Proyectos y secciones…"
+        case .sessions: "Sesiones de agentes"
+        case .notch: "Abrir la notch"
+        }
     }
 
     @objc private func openSettings() {
@@ -121,20 +175,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 700),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Pila"
+        window.title = "MacTools"
         // Without this the window stays on whatever Space it was first opened in.
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
-        let hosting = NSHostingView(rootView: SettingsView(settings: Settings.shared, calendar: self.calendar ?? CalendarManager()))
+        let hosting = NSHostingView(rootView: SettingsView(settings: Settings.shared, calendar: self.calendar ?? CalendarManager(), sessions: self.sessions ?? SessionStore()))
         window.contentView = hosting
-        // Apple settings windows size to their content instead of guessing a height.
-        window.setContentSize(hosting.fittingSize)
+        window.setContentSize(NSSize(width: 720, height: 480))
+        window.contentMinSize = NSSize(width: 640, height: 400)
         window.center()
         window.isReleasedWhenClosed = false
         self.settingsWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func openProjects() {
+        guard let tasks else { return }
+        if let projectsWindow {
+            projectsWindow.center()
+            projectsWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        // A hosting controller resizes the window as projects come and go; a plain hosting view
+        // would freeze whatever height the list happened to have when it opened.
+        let controller = NSHostingController(rootView: ProjectsView(tasks: tasks) { [weak self] in
+            guard let self else { return }
+            self.projectsWindow?.performClose(nil)
+            if self.projectsCameFromQuickAdd {
+                self.projectsCameFromQuickAdd = false
+                self.quickAdd?.show()
+            }
+        })
+        controller.sizingOptions = [.preferredContentSize]
+        let window = NSWindow(contentViewController: controller)
+        window.styleMask = [.titled, .closable]
+        window.title = "Proyectos y secciones"
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        window.center()
+        window.isReleasedWhenClosed = false
+        self.projectsWindow = window
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -144,8 +228,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image = MenuBarIcon.make()
 
         let menu = NSMenu()
-        menu.addItem(withTitle: "Abrir historial  \(Settings.shared.shortcutDisplay)", action: #selector(self.openPanel), keyEquivalent: "")
-        menu.addItem(withTitle: "Nueva tarea  ⇧⌘T", action: #selector(self.openQuickAdd), keyEquivalent: "")
+        menu.addItem(withTitle: "Abrir historial", action: #selector(self.openPanel), keyEquivalent: "")
+        menu.addItem(withTitle: "Nueva tarea", action: #selector(self.openQuickAdd), keyEquivalent: "")
+        menu.addItem(withTitle: "Proyectos y secciones…", action: #selector(self.openProjects), keyEquivalent: "")
         menu.addItem(withTitle: "Configuración…", action: #selector(self.openSettings), keyEquivalent: ",")
         menu.addItem(.separator())
 
@@ -186,13 +271,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 sender.state = .on
             }
         } catch {
-            NSLog("Pila: no se pudo cambiar el login item: \(error)")
+            NSLog("MacTools: no se pudo cambiar el login item: \(error)")
         }
     }
 
     private func presentFatal(_ message: String) {
         let alert = NSAlert()
-        alert.messageText = "Pila"
+        alert.messageText = "MacTools"
         alert.informativeText = message
         alert.alertStyle = .critical
         alert.runModal()
@@ -206,6 +291,6 @@ MainActor.assumeIsolated {
     let delegate = AppDelegate()
     app.delegate = delegate
     app.setActivationPolicy(.accessory)
-    objc_setAssociatedObject(app, "PilaDelegate", delegate, .OBJC_ASSOCIATION_RETAIN)
+    objc_setAssociatedObject(app, "MacToolsDelegate", delegate, .OBJC_ASSOCIATION_RETAIN)
     app.run()
 }

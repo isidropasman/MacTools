@@ -168,6 +168,16 @@ final class MediaController: ObservableObject {
         }
     }
 
+    /// Brings the player forward, which is what tapping the track is asking for.
+    func openPlayer() {
+        guard let player = track?.player else { return }
+        for path in ["/Applications/\(player).app", "/System/Applications/\(player).app"]
+        where FileManager.default.fileExists(atPath: path) {
+            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            return
+        }
+    }
+
     /// The real app icon beats bundling a trademarked logo, and it stays correct if the app rebrands.
     private func loadAppIconIfNeeded(_ player: String) {
         guard self.appIcon == nil || self.track?.player != player else { return }

@@ -18,13 +18,74 @@ final class Settings: ObservableObject {
         static let useNotch = "UseNotch"
         static let peekOnTrackChange = "PeekOnTrackChange"
         static let hideFromCapture = "HideFromCapture"
+        static let hoverDelay = "HoverDelay"
+        static let rememberLastTab = "RememberLastTab"
+        static let lastTab = "LastTab"
     }
 
-    /// Fires when the shortcut changes so the app can re-register it.
+    /// Fires when any shortcut changes so the app can re-register them.
     let hotKeyChanged = PassthroughSubject<Void, Never>()
 
+    /// Bumped on every shortcut edit so SwiftUI redraws the rows.
+    @Published private(set) var shortcutRevision = 0
+
+    struct Shortcut: Equatable {
+        var key: UInt32
+        var modifiers: UInt32
+    }
+
+    func shortcut(for tool: Tool) -> Shortcut? {
+        // The clipboard shortcut predates this table, so its original keys stay authoritative.
+        if tool == .history {
+            return Shortcut(key: self.keyCode, modifiers: self.modifiers)
+        }
+        if self.defaults.bool(forKey: Self.clearedKey(tool)) { return nil }
+        guard let key = defaults.object(forKey: Self.shortcutKey(tool)) as? Int,
+              let modifiers = defaults.object(forKey: Self.modifiersKey(tool)) as? Int
+        else {
+            return tool.defaultShortcut.map { Shortcut(key: $0.key, modifiers: $0.modifiers) }
+        }
+        return Shortcut(key: UInt32(key), modifiers: UInt32(modifiers))
+    }
+
+    func setShortcut(_ shortcut: Shortcut?, for tool: Tool) {
+        if tool == .history {
+            guard let shortcut else { return }
+            self.keyCode = shortcut.key
+            self.modifiers = shortcut.modifiers
+            self.shortcutRevision += 1
+            return
+        }
+        if let shortcut {
+            self.defaults.set(Int(shortcut.key), forKey: Self.shortcutKey(tool))
+            self.defaults.set(Int(shortcut.modifiers), forKey: Self.modifiersKey(tool))
+            self.defaults.set(false, forKey: Self.clearedKey(tool))
+        } else {
+            self.defaults.set(true, forKey: Self.clearedKey(tool))
+        }
+        self.shortcutRevision += 1
+        self.hotKeyChanged.send()
+    }
+
+    func display(_ shortcut: Shortcut) -> String {
+        var parts = ""
+        if shortcut.modifiers & UInt32(controlKey) != 0 { parts += "⌃" }
+        if shortcut.modifiers & UInt32(optionKey) != 0 { parts += "⌥" }
+        if shortcut.modifiers & UInt32(shiftKey) != 0 { parts += "⇧" }
+        if shortcut.modifiers & UInt32(cmdKey) != 0 { parts += "⌘" }
+        return parts + Self.keyName(shortcut.key)
+    }
+
+    private static func shortcutKey(_ tool: Tool) -> String { "Shortcut.\(tool.rawValue).key" }
+    private static func modifiersKey(_ tool: Tool) -> String { "Shortcut.\(tool.rawValue).modifiers" }
+    private static func clearedKey(_ tool: Tool) -> String { "Shortcut.\(tool.rawValue).cleared" }
+
     @Published var keyCode: UInt32 {
-        didSet { self.defaults.set(Int(self.keyCode), forKey: Key.keyCode); self.hotKeyChanged.send() }
+        didSet {
+            self.defaults.set(Int(self.keyCode), forKey: Key.keyCode)
+            self.shortcutRevision += 1
+            self.hotKeyChanged.send()
+        }
     }
 
     @Published var modifiers: UInt32 {
@@ -66,6 +127,21 @@ final class Settings: ObservableObject {
         }
     }
 
+    /// How long the pointer has to settle on the cutout before the notch opens. Brushing past it
+    /// on the way to the menu bar should not count.
+    @Published var hoverDelay: Double {
+        didSet { self.defaults.set(self.hoverDelay, forKey: Key.hoverDelay) }
+    }
+
+    @Published var rememberLastTab: Bool {
+        didSet { self.defaults.set(self.rememberLastTab, forKey: Key.rememberLastTab) }
+    }
+
+    var lastTab: String? {
+        get { self.defaults.string(forKey: Key.lastTab) }
+        set { self.defaults.set(newValue, forKey: Key.lastTab) }
+    }
+
     let captureVisibilityChanged = PassthroughSubject<Void, Never>()
 
     nonisolated static var hideFromCaptureNow: Bool {
@@ -83,6 +159,8 @@ final class Settings: ObservableObject {
         self.useNotch = self.defaults.object(forKey: Key.useNotch) as? Bool ?? true
         self.peekOnTrackChange = self.defaults.object(forKey: Key.peekOnTrackChange) as? Bool ?? false
         self.hideFromCapture = self.defaults.object(forKey: Key.hideFromCapture) as? Bool ?? true
+        self.hoverDelay = self.defaults.object(forKey: Key.hoverDelay) as? Double ?? 0.16
+        self.rememberLastTab = self.defaults.object(forKey: Key.rememberLastTab) as? Bool ?? true
     }
 
     var maxImageBytes: Int64 { Int64(self.maxImageGB * 1024 * 1024 * 1024) }

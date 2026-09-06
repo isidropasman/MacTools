@@ -16,6 +16,8 @@ final class Store {
 
     static let supportDirectory: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        // El nombre de la carpeta se queda en "Pila": renombrarla perderia el historial,
+        // las tareas y el estante que ya estan adentro.
         let current = base.appendingPathComponent("Pila", isDirectory: true)
 
         // The app shipped briefly as "MacTools"; carry that history over instead of orphaning it.

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// One line in, structure out. A form with six fields would be "customisable" and unusable; the
 /// tokens keep every field optional and reachable without leaving the keyboard.
@@ -6,7 +7,7 @@ import Foundation
 ///   Revisar el deck #plexo @Keynote !review en 25m
 enum TaskParser {
     struct Parsed: Equatable {
-        var title: String
+        var title: String = ""
         var project: String?
         /// "#plexo/code" splits into project and section.
         var section: String?
@@ -14,10 +15,43 @@ enum TaskParser {
         var app: String?
         var priority: Int?
         var due: Date?
+
+        var hasAttributes: Bool {
+            self.project != nil || self.type != nil || self.app != nil || self.priority != nil || self.due != nil
+        }
     }
 
     /// p1 is the one you do now, p3 the one you might. Anything else stays part of the title.
-    static let priorityTokens = ["p1": 1, "p2": 2, "p3": 3]
+    static let priorityTokens = ["p1": 1, "p2": 2, "p3": 3, "p4": 4]
+
+    static let priorityNames = [1: "Extra High", 2: "High", 3: "Medium", 4: "Low"]
+
+    /// Types are free-form, so their colour comes from the name and stays put instead of shifting
+    /// as new types appear.
+    static func typeTint(_ type: String?) -> Color {
+        guard let type else { return .purple }
+        let index = abs(type.hashValue) % ProjectPalette.order.count
+        return ProjectPalette.colors[ProjectPalette.order[index]] ?? .purple
+    }
+
+    /// Urgency, not decoration: how red it is says how soon it is.
+    static func dueTint(_ due: Date?) -> Color {
+        guard let due else { return .green }
+        let minutes = due.timeIntervalSinceNow / 60
+        if minutes < 0 { return .red }
+        if minutes < 60 { return .orange }
+        if Calendar.current.isDateInToday(due) { return .yellow }
+        return .green
+    }
+
+    static func priorityTint(_ level: Int?) -> Color {
+        switch level {
+        case 1: .red
+        case 2: .orange
+        case 3: .yellow
+        default: .gray
+        }
+    }
 
     static func parse(_ input: String, now: Date = Date(), calendar: Calendar = .current) -> Parsed {
         var project: String?
