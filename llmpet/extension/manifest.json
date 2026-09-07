@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "LLMPet",
+  "version": "1.4",
+  "description": "Reporta el estado de las sesiones LLM web a LLMPet.",
+  "permissions": ["tabs", "scripting"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/*",
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://gemini.google.com/*",
+        "https://aistudio.google.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

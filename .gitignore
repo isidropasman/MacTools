@@ -1,11 +1,18 @@
 .build/
+MacTools.app/
+MacTools.iconset/
 Pila.app/
 Pila.iconset/
 .DS_Store
 .gstack/
 
 # Derivado de Tools/make-icon.swift; build.sh lo regenera si falta
+MacTools.icns
 Pila.icns
 
-# Proyecto aparte que vive en esta carpeta. Pendiente decidir si entra al repo.
-llmpet/
+# llmpet: app de monitoreo de sesiones LLM. Vive acá pero es su propio
+# SwiftPM package — el Package.swift de la raíz solo compila Sources/Pila.
+llmpet/.build/
+
+# Salida de release.sh
+dist/

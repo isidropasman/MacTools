@@ -94,6 +94,15 @@ MacTools pushed me outside the web/AI stack I spend most of my time in:
 - coordinating OS permissions and app lifecycle;
 - building software for a user whose workflow I know extremely well: me.
 
+## Install
+
+```sh
+brew install --cask isidropasman/tap/mactools
+```
+
+Requires macOS 14 or newer. Full instructions, permissions and screenshots:
+[the tap](https://github.com/isidropasman/homebrew-tap).
+
 ## Build
 
 The project uses Swift Package Manager.
@@ -123,3 +132,14 @@ If yes, I try it. If it earns its place, it stays.
 **Notice friction → build the tool → keep moving.**
 
 </div>
+
+To ship a version:
+
+```sh
+./release.sh
+```
+
+Without an Apple Developer account it signs ad-hoc — the local certificate only
+exists on the machine that compiles — and puts a step-by-step README inside the DMG.
+With one, set `MACTOOLS_IDENTITY` and `MACTOOLS_NOTARY_PROFILE` and it signs and
+notarizes instead.
