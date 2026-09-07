@@ -273,18 +273,23 @@ struct NotchView: View {
         }
     }
 
-    // MARK: - Music
-
-    @ViewBuilder
     // MARK: - Home
 
+    @ViewBuilder
     private var homeTab: some View {
-        HStack(alignment: .top, spacing: 12) {
-            self.musicTab
-                .frame(width: 254, alignment: .leading)
-
+        // Sin música la agenda se queda con todo el ancho: media notch vacía al lado de "Nada
+        // sonando" es peor que no tener la columna.
+        if self.media.track == nil {
             self.agendaColumn
                 .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(alignment: .top, spacing: 12) {
+                self.musicTab
+                    .frame(width: 254, alignment: .leading)
+
+                self.agendaColumn
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -310,7 +315,8 @@ struct NotchView: View {
                 .fixedSize()
                 .padding(.trailing, 5)
 
-            HStack(spacing: 5) {
+            let wide = self.media.track == nil
+            HStack(spacing: wide ? 0 : 5) {
             ForEach(days, id: \.self) { day in
                 let isToday = calendar.isDateInToday(day)
                 VStack(spacing: 2) {
@@ -324,11 +330,14 @@ struct NotchView: View {
                         .frame(width: 18, height: 18)
                         .background(Circle().fill(isToday ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.clear)))
                 }
+                // Sharing the row equally only fits when music is not taking half the panel; in the
+                // split layout it blew every slot up to the widest label and pushed the last day off.
+                .frame(maxWidth: wide ? .infinity : nil)
             }
             }
-            // Each day takes the width it needs. Sharing the row equally blew every slot up to the
-            // widest label and pushed the last day off the panel.
-            Spacer(minLength: 0)
+            .frame(maxWidth: wide ? .infinity : nil)
+
+            if !wide { Spacer(minLength: 0) }
         }
         // A day sliced through the middle looks broken; the column simply ends.
         .clipped()

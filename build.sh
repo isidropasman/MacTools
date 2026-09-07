@@ -7,7 +7,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 APP="MacTools.app"
-VERSION="0.1.1"
+VERSION="0.1.2"
 
 swift build -c release
 
