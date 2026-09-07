@@ -1,6 +1,6 @@
 <div align="center">
 
-# MacTools
+# Notchbox
 
 ### I kept paying for tiny Mac utilities. So I started building my own.
 
@@ -12,7 +12,7 @@
 
 ---
 
-MacTools is my personal macOS toolbox: a native app where I keep turning small recurring annoyances into software.
+Notchbox is my personal macOS toolbox: a native app where I keep turning small recurring annoyances into software.
 
 It wasn't designed from a startup thesis or a market map. It grew from a much simpler loop:
 
@@ -97,7 +97,7 @@ MacTools pushed me outside the web/AI stack I spend most of my time in:
 ## Install
 
 ```sh
-brew install --cask isidropasman/tap/mactools
+brew install --cask isidropasman/tap/notchbox
 ```
 
 Requires macOS 14 or newer. Full instructions, permissions and screenshots:
@@ -141,5 +141,5 @@ To ship a version:
 
 Without an Apple Developer account it signs ad-hoc — the local certificate only
 exists on the machine that compiles — and puts a step-by-step README inside the DMG.
-With one, set `MACTOOLS_IDENTITY` and `MACTOOLS_NOTARY_PROFILE` and it signs and
+With one, set `NOTCHBOX_IDENTITY` and `NOTCHBOX_NOTARY_PROFILE` and it signs and
 notarizes instead.

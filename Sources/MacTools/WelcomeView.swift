@@ -90,7 +90,7 @@ struct WelcomeView: View {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("MacTools")
+                        Text("Notchbox")
                             .font(.system(size: 26, weight: .bold))
                         Text("Todo lo que usás todo el día, colgado de la notch.")
                             .font(.system(size: 13))

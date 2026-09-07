@@ -1,26 +1,26 @@
 #!/bin/bash
-# Builds MacTools.app without Xcode: SPM binary + hand-assembled bundle + ad-hoc signature.
+# Builds Notchbox.app without Xcode: SPM binary + hand-assembled bundle + ad-hoc signature.
 # No Accessibility permission is needed (the hotkey uses Carbon RegisterEventHotKey), so the
 # ad-hoc cdhash changing on every rebuild costs nothing.
 
 set -euo pipefail
 
 cd "$(dirname "$0")"
-APP="MacTools.app"
-VERSION="0.1.2"
+APP="Notchbox.app"
+VERSION="0.2.0"
 
 swift build -c release
 
-if [ ! -f MacTools.icns ]; then
-    rm -rf MacTools.iconset
-    swift Tools/make-icon.swift MacTools.iconset
-    iconutil -c icns MacTools.iconset -o MacTools.icns
+if [ ! -f Notchbox.icns ]; then
+    rm -rf Notchbox.iconset
+    swift Tools/make-icon.swift Notchbox.iconset
+    iconutil -c icns Notchbox.iconset -o Notchbox.icns
 fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/MacTools "$APP/Contents/MacOS/MacTools"
-cp MacTools.icns "$APP/Contents/Resources/MacTools.icns"
+cp .build/release/MacTools "$APP/Contents/MacOS/Notchbox"
+cp Notchbox.icns "$APP/Contents/Resources/Notchbox.icns"
 
 # Los hooks y la extension viajan dentro de la app: sin esto el boton de instalar conectores
 # depende de que el repo siga en el disco de quien la usa.
@@ -33,23 +33,23 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleExecutable</key><string>MacTools</string>
+	<key>CFBundleExecutable</key><string>Notchbox</string>
 	<!-- El identificador se queda: cambiarlo huerfana los permisos de TCC y las preferencias
 	     guardadas, que es exactamente lo que costo semanas arreglar. -->
 	<key>CFBundleIdentifier</key><string>dev.isidropasman.pila</string>
 	<key>CFBundleDevelopmentRegion</key><string>es</string>
 	<key>CFBundleLocalizations</key><array><string>es</string><string>en</string></array>
-	<key>CFBundleName</key><string>MacTools</string>
-	<key>CFBundleDisplayName</key><string>MacTools</string>
-	<key>CFBundleIconFile</key><string>MacTools</string>
+	<key>CFBundleName</key><string>Notchbox</string>
+	<key>CFBundleDisplayName</key><string>Notchbox</string>
+	<key>CFBundleIconFile</key><string>Notchbox</string>
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>$VERSION</string>
 	<key>CFBundleVersion</key><string>$VERSION</string>
 	<key>LSMinimumSystemVersion</key><string>14.0</string>
 	<key>LSUIElement</key><true/>
-	<key>NSAppleEventsUsageDescription</key><string>MacTools lee y controla la reproduccion de Spotify y Music para mostrarla en la notch.</string>
-	<key>NSCalendarsUsageDescription</key><string>MacTools muestra tus proximos eventos del dia en la notch.</string>
-	<key>NSCalendarsFullAccessUsageDescription</key><string>MacTools muestra tus proximos eventos del dia en la notch.</string>
+	<key>NSAppleEventsUsageDescription</key><string>Notchbox lee y controla la reproduccion de Spotify y Music para mostrarla en la notch.</string>
+	<key>NSCalendarsUsageDescription</key><string>Notchbox muestra tus proximos eventos del dia en la notch.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key><string>Notchbox muestra tus proximos eventos del dia en la notch.</string>
 	<key>NSHumanReadableCopyright</key><string>Isidro Pasman</string>
 </dict>
 </plist>
@@ -75,10 +75,10 @@ echo "Listo: $(pwd)/$APP"
 # Install without re-signing: a second codesign pass would change the cdhash and
 # silently invalidate the Accessibility grant macOS recorded for the previous one.
 if [ "${1:-}" = "install" ]; then
-    pkill -f "MacTools.app/Contents/MacOS" 2>/dev/null || true
+    pkill -f "Notchbox.app/Contents/MacOS" 2>/dev/null || true
     sleep 1
-    rm -rf /Applications/Pila.app /Applications/MacTools.app
-    cp -R "$APP" /Applications/MacTools.app
-    open -a /Applications/MacTools.app
-    echo "Instalado en /Applications/MacTools.app (firma intacta)"
+    rm -rf /Applications/Pila.app /Applications/MacTools.app /Applications/Notchbox.app
+    cp -R "$APP" /Applications/Notchbox.app
+    open -a /Applications/Notchbox.app
+    echo "Instalado en /Applications/Notchbox.app (firma intacta)"
 fi

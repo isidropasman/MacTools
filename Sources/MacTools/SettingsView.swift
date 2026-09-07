@@ -275,7 +275,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            SwiftUI.Section("En MacTools") {
+            SwiftUI.Section("En Notchbox") {
                 Toggle("Guardar los dictados en el portapapeles", isOn: self.$settings.ingestDictations)
             }
 

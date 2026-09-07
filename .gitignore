@@ -1,4 +1,6 @@
 .build/
+Notchbox.app/
+Notchbox.iconset/
 MacTools.app/
 MacTools.iconset/
 Pila.app/
@@ -7,6 +9,7 @@ Pila.iconset/
 .gstack/
 
 # Derivado de Tools/make-icon.swift; build.sh lo regenera si falta
+Notchbox.icns
 MacTools.icns
 Pila.icns
 

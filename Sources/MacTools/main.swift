@@ -140,7 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let hotKey {
                 self.hotKeys[tool] = hotKey
             } else {
-                NSLog("MacTools: no se pudo registrar el atajo de \(tool.title), probablemente ya lo tomó otra app")
+                NSLog("Notchbox: no se pudo registrar el atajo de \(tool.title), probablemente ya lo tomó otra app")
             }
         }
 
@@ -194,7 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "MacTools"
+        window.title = "Notchbox"
         // Without this the window stays on whatever Space it was first opened in.
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         let hosting = NSHostingView(rootView: SettingsView(
@@ -322,13 +322,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 sender.state = .on
             }
         } catch {
-            NSLog("MacTools: no se pudo cambiar el login item: \(error)")
+            NSLog("Notchbox: no se pudo cambiar el login item: \(error)")
         }
     }
 
     private func presentFatal(_ message: String) {
         let alert = NSAlert()
-        alert.messageText = "MacTools"
+        alert.messageText = "Notchbox"
         alert.informativeText = message
         alert.alertStyle = .critical
         alert.runModal()
