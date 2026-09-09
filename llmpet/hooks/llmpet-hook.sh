@@ -25,9 +25,17 @@ fi
 AGENT_PID=$(ps -o ppid= -p $PPID 2>/dev/null | tr -d ' ')
 [ -z "$AGENT_PID" ] && AGENT_PID=$PPID
 
+# El tty es el unico handle estable para "traeme *esa* pestania": Terminal.app e
+# iTerm2 lo exponen por pestania. Sin esto la fila solo podia abrir la carpeta.
+TTY=$(ps -o tty= -p "$AGENT_PID" 2>/dev/null | tr -d ' ')
+case "$TTY" in
+  ttys*) TTY="/dev/$TTY" ;;
+  *)     TTY="" ;;
+esac
+
 /usr/bin/python3 -c '
 import json,os,sys
-sid, cwd, state, path, pid = sys.argv[1:6]
+sid, cwd, state, path, pid, tty = sys.argv[1:7]
 cwd = cwd or os.getcwd()
 json.dump({
   "title": os.path.basename(cwd) or sid[:8],
@@ -38,5 +46,6 @@ json.dump({
   "state": state,
   "pid": int(pid),
   "open": "file://" + cwd,
+  **({"tty": tty} if tty else {}),
 }, open(path, "w"))
-' "$SID" "$CWD" "$1" "$FILE" "$AGENT_PID"
+' "$SID" "$CWD" "$1" "$FILE" "$AGENT_PID" "$TTY"

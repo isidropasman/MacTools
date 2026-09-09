@@ -29,6 +29,10 @@ struct LLMSession: Identifiable, Equatable {
     let agent: String?
     /// Where it runs: "Conductor", "cloud", "terminal", or the site name.
     let origin: String
+    /// tty the agent runs on ("/dev/ttys006"). The only stable handle for
+    /// "raise *that* tab" on a terminal session, mirroring what tabID does for
+    /// browser tabs.
+    var tty: String? = nil
 
     var appName: String? {
         appPath.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent }
@@ -228,7 +232,8 @@ struct FileSource: SessionSource {
                 },
                 tokens: nil,
                 agent: raw["agent"] as? String,
-                origin: raw["origin"] as? String ?? (source == "chrome" ? "web" : "terminal")
+                origin: raw["origin"] as? String ?? (source == "chrome" ? "web" : "terminal"),
+                tty: raw["tty"] as? String
             ))
         }
         return out
@@ -343,6 +348,14 @@ final class SessionStore: ObservableObject {
             focusBrowserTab(session)
             return
         }
+        // Una fila de terminal abria la *carpeta*: el hook no tenia handle de la
+        // ventana, asi que file://cwd era lo mejor posible y el click te dejaba
+        // en Finder en vez de la sesion que estabas esperando. El tty es ese
+        // handle. Si el terminal no es direccionable, cae al file:// de abajo.
+        if session.origin == "terminal", let tty = session.tty, focusTerminalTab(tty: tty) {
+            return
+        }
+
         guard let raw = session.openURL, let url = URL(string: raw) else { return }
 
         // macOS only lets the *active* application hand focus to another one, and
@@ -373,6 +386,63 @@ final class SessionStore: ObservableObject {
 /// An Apple Event asks the target to activate *itself*, which is a request macOS
 /// always honours regardless of who is frontmost. Verified: Conductor becomes the
 /// frontmost process.
+/// Terminal.app y iTerm2 exponen el tty de cada pestania, asi que la fila puede
+/// levantar la pestania exacta en vez de la carpeta. Ghostty y WezTerm no lo
+/// exponen: ahi devuelve false y el caller sigue con el file://.
+private func focusTerminalTab(tty: String) -> Bool {
+    let candidates: [(bundleID: String, source: String)] = [
+        ("com.apple.Terminal", """
+        tell application id "com.apple.Terminal"
+          repeat with w in windows
+            repeat with t in tabs of w
+              if tty of t is "\(tty)" then
+                set selected of t to true
+                set frontmost of w to true
+                activate
+                return "ok"
+              end if
+            end repeat
+          end repeat
+        end tell
+        return "no"
+        """),
+        ("com.googlecode.iterm2", """
+        tell application id "com.googlecode.iterm2"
+          repeat with w in windows
+            repeat with t in tabs of w
+              repeat with s in sessions of t
+                if tty of s is "\(tty)" then
+                  select w
+                  select t
+                  select s
+                  activate
+                  return "ok"
+                end if
+              end repeat
+            end repeat
+          end repeat
+        end tell
+        return "no"
+        """),
+    ]
+
+    for (bundleID, source) in candidates {
+        // Solo preguntarle a los que ya estan corriendo: `tell application`
+        // lanzaria un terminal que el usuario ni usa.
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
+        else { continue }
+
+        var error: NSDictionary?
+        let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
+        if let error {
+            NSLog("llmpet: no pude enfocar \(tty) en \(bundleID): \(error)")
+            continue
+        }
+        if result?.stringValue == "ok" { return true }
+    }
+    return false
+}
+
 private func activateViaAppleEvent(bundleID: String) {
     var error: NSDictionary?
     NSAppleScript(source: "tell application id \"\(bundleID)\" to activate")?
