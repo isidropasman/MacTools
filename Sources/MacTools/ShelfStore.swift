@@ -63,25 +63,29 @@ final class ShelfStore: ObservableObject {
     }
 
     func remove(_ url: URL) {
-        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
-        try? FileManager.default.removeItem(at: url)
-        self.reload()
+        guard self.items.contains(url) else { return }
+        self.items.removeAll { $0 == url }
+
+        Task { [weak self] in
+            let removed = await Task.detached(priority: .utility) {
+                Self.removeItem(at: url)
+            }.value
+            guard !removed else { return }
+            self?.reload()
+        }
     }
 
     func clear() {
-        // Sweeps the folder rather than the list: anything the list failed to show still has to go.
-        let contents = (try? FileManager.default.contentsOfDirectory(
-            at: Self.directory,
-            includingPropertiesForKeys: nil,
-            options: []
-        )) ?? []
-        for item in contents {
-            // Folders copied by older builds landed without their execute bit, which made them
-            // impossible to traverse and so impossible to delete.
-            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: item.path)
-            try? FileManager.default.removeItem(at: item)
+        self.items = []
+        let directory = Self.directory
+
+        Task { [weak self] in
+            let cleared = await Task.detached(priority: .utility) {
+                Self.emptyDirectory(at: directory)
+            }.value
+            guard !cleared else { return }
+            self?.reload()
         }
-        self.reload()
     }
 
     var totalBytes: Int64 {
@@ -92,5 +96,35 @@ final class ShelfStore: ObservableObject {
 
     static func icon(for url: URL) -> NSImage {
         NSWorkspace.shared.icon(forFile: url.path)
+    }
+
+    private nonisolated static func removeItem(at url: URL) -> Bool {
+        do {
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+            try FileManager.default.removeItem(at: url)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private nonisolated static func emptyDirectory(at directory: URL) -> Bool {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: []
+        ) else { return false }
+
+        var succeeded = true
+        for item in contents {
+            do {
+                // Older builds copied folders without execute permission, preventing traversal.
+                try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: item.path)
+                try FileManager.default.removeItem(at: item)
+            } catch {
+                succeeded = false
+            }
+        }
+        return succeeded
     }
 }

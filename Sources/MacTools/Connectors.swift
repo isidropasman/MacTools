@@ -18,12 +18,14 @@ final class Connectors: ObservableObject {
 
     @Published private(set) var list: [Connector] = []
     private var timer: Timer?
+    private let browserMedia: BrowserMediaStore?
 
     static let home = NSHomeDirectory() + "/.llmpet"
     private static let conductorDB = NSHomeDirectory()
         + "/Library/Application Support/com.conductor.app/conductor.db"
 
-    init() {
+    init(browserMedia: BrowserMediaStore? = nil) {
+        self.browserMedia = browserMedia
         self.refresh()
         let timer = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -34,6 +36,7 @@ final class Connectors: ObservableObject {
 
     func refresh() {
         let fm = FileManager.default
+        let browserReporting = Self.extensionReporting || self.browserMedia?.playback != nil
         let list: [Connector] = [
             Connector(
                 id: "conductor",
@@ -54,6 +57,16 @@ final class Connectors: ObservableObject {
                 note: fm.fileExists(atPath: "/Applications/Claude.app") ? nil : "La app no está instalada."
             ),
             Connector(
+                id: "t3code",
+                name: "T3 Code",
+                detail: String(localized: "Se lee de su base local. No hay nada que instalar."),
+                symbol: "chevron.left.forwardslash.chevron.right",
+                installed: fm.fileExists(atPath: T3SessionSource.dataDirectory.appendingPathComponent("statev2.sqlite").path),
+                install: nil,
+                note: fm.fileExists(atPath: T3SessionSource.dataDirectory.appendingPathComponent("statev2.sqlite").path)
+                    ? nil : String(localized: "Abrí T3 Code para crear su base local.")
+            ),
+            Connector(
                 id: "terminal",
                 name: String(localized: "Claude Code y Codex en la terminal"),
                 detail: String(localized: "Un hook les avisa cuándo arrancan y cuándo terminan."),
@@ -64,12 +77,12 @@ final class Connectors: ObservableObject {
             ),
             Connector(
                 id: "chrome",
-                name: String(localized: "ChatGPT y Claude en el navegador"),
-                detail: String(localized: "Una extensión de Chrome reporta cada pestaña."),
+                name: String(localized: "Chrome: IA y YouTube"),
+                detail: String(localized: "La extensión conecta sesiones de IA y controles de YouTube."),
                 symbol: "globe",
-                installed: Self.extensionReporting,
+                installed: browserReporting,
                 install: { Self.revealExtension() },
-                note: Self.extensionReporting
+                note: browserReporting
                     ? nil
                     : "Abre la carpeta: cargala en chrome://extensions con «Cargar descomprimida»."
             ),

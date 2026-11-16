@@ -3,7 +3,7 @@ import Combine
 import SwiftUI
 
 /// Hover target over the cutout. The window is always full size, so while collapsed this view has
-/// to refuse every point outside the cutout, otherwise a 460x190 invisible panel would swallow
+/// to refuse every point outside the cutout, otherwise a 520x190 invisible panel would swallow
 /// clicks on the menu bar underneath it.
 private final class HoverView: NSView {
     var onEnter: (() -> Void)?
@@ -15,22 +15,25 @@ private final class HoverView: NSView {
     }
     var onDropTargeted: ((Bool) -> Void)?
     var onDropFiles: (([URL]) -> Void)?
+    var peekRect: NSRect = .zero {
+        didSet { self.updateTrackingAreas() }
+    }
 
     /// Region that counts as "the notch" while collapsed, in this view's coordinates.
     var notchRect: NSRect = .zero {
         didSet { self.updateTrackingAreas() }
     }
-    /// Same region in screen coordinates. A tracking area can fire from further out than its rect
-    /// suggests, so entering is confirmed against the real pointer position before opening.
-    var triggerScreenRect: NSRect = .zero
     var slack: CGFloat = 6
     var expanded = false {
         didSet { self.updateTrackingAreas() }
     }
 
     private var tracking: NSTrackingArea?
+    private var pointerInside = false
+    private let expandedHeight: CGFloat
 
-    override init(frame frameRect: NSRect) {
+    init(frame frameRect: NSRect, expandedHeight: CGFloat) {
+        self.expandedHeight = expandedHeight
         super.init(frame: frameRect)
         self.registerForDraggedTypes([.fileURL])
     }
@@ -61,17 +64,24 @@ private final class HoverView: NSView {
     }
 
     private var activeRect: NSRect {
-        if self.expanded || self.dragging { return self.bounds }
-        // A drag needs a slightly more forgiving target than a pointer does.
-        return self.notchRect.insetBy(dx: -16, dy: -6)
+        if self.dragging { return self.bounds }
+        if self.expanded {
+            return NSRect(
+                x: self.bounds.minX, y: self.bounds.maxY - self.expandedHeight,
+                width: self.bounds.width, height: self.expandedHeight
+            )
+        }
+        return self.peekRect.isEmpty ? self.notchRect : self.notchRect.union(self.peekRect)
     }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
+        guard self.tracking?.rect != self.activeRect else { return }
+        self.pointerInside = false
         if let tracking { self.removeTrackingArea(tracking) }
         let area = NSTrackingArea(
             rect: self.activeRect,
-            options: [.mouseEnteredAndExited, .activeAlways],
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways],
             owner: self
         )
         self.addTrackingArea(area)
@@ -85,13 +95,39 @@ private final class HoverView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        guard self.expanded
-            || NotchGeometry.pointerIsOnNotch(NSEvent.mouseLocation, trigger: self.triggerScreenRect, slack: self.slack)
-        else { return }
-        self.onEnter?()
+        let point = self.window?.convertPoint(fromScreen: NSEvent.mouseLocation) ?? event.locationInWindow
+        self.updateHover(at: self.convert(point, from: nil))
     }
 
-    override func mouseExited(with event: NSEvent) { self.onExit?() }
+    override func mouseMoved(with event: NSEvent) {
+        self.updateHover(at: self.convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        // AppKit can deliver an exit from the compact music region after the panel expanded.
+        self.updatePointer(at: NSEvent.mouseLocation)
+    }
+
+    func updatePointer(at screenPoint: NSPoint) {
+        guard let window = self.window else { return }
+        self.updateHover(at: self.convert(window.convertPoint(fromScreen: screenPoint), from: nil))
+    }
+
+    private func updateHover(at point: NSPoint) {
+        let rect = self.activeRect
+        let ignoresMouse = !rect.contains(point)
+        if let window = self.window, window.ignoresMouseEvents != ignoresMouse {
+            // A nil view hit test alone does not release the window's capture of browser clicks.
+            window.ignoresMouseEvents = ignoresMouse
+        }
+        let inside = self.expanded || self.dragging
+            ? point.x >= rect.minX && point.x <= rect.maxX && point.y >= rect.minY && point.y <= rect.maxY
+            : NotchGeometry.pointerIsOnNotch(point, trigger: self.notchRect, slack: self.slack)
+        guard inside != self.pointerInside else { return }
+        self.pointerInside = inside
+        if inside { self.onEnter?() }
+        else { self.onExit?() }
+    }
 }
 
 private final class NotchPanel: NSPanel {
@@ -112,14 +148,17 @@ final class NotchController {
     private var collapseTask: Task<Void, Never>?
     private var expandTask: Task<Void, Never>?
     private var peekTask: Task<Void, Never>?
-    /// Seeded on first sample so launching the app does not fire a peek for whatever was already on.
-    private var lastTrackKey: String?
-    private var lastCharging: Bool?
+    private var musicPeek: NotchState.Peek?
+    private var transientPeek: NotchState.Peek?
+    private var batteryEvents = BatteryMonitor.EventTracker()
+    private var pendingBatteryPeek: NotchState.Peek?
     private var cancellables = Set<AnyCancellable>()
     private var dragMonitor: Any?
+    private var pointerMonitor: Any?
     private var armedDisplay: CGDirectDisplayID?
 
     private let media: MediaController
+    private let notifications = NotificationMonitor()
     private let shelf: ShelfStore
     private let battery: BatteryMonitor
     private let calendar: CalendarManager
@@ -156,6 +195,7 @@ final class NotchController {
         for other in self.surfaces {
             other.hover.dragging = NotchGeometry.displayID(of: other.screen) == id
         }
+        self.updatePointerTargets()
 
         guard let surface else {
             self.state.dropTargeted = false
@@ -189,7 +229,8 @@ final class NotchController {
             self.expandTask?.cancel()
             self.expandTask = nil
             self.peekTask?.cancel()
-            self.state.peek = nil
+            self.transientPeek = nil
+            if self.state.peekScreen != id { self.state.peek = nil }
             self.state.expandedScreen = id
         }
     }
@@ -200,6 +241,7 @@ final class NotchController {
         self.expandTask = nil
         self.collapseTask?.cancel()
         self.state.expandedScreen = nil
+        self.updateVisiblePeek()
     }
 
     init(media: MediaController, shelf: ShelfStore, battery: BatteryMonitor, calendar: CalendarManager, tasks: TaskStore, sessions: SessionStore) {
@@ -214,6 +256,9 @@ final class NotchController {
     func install() {
         self.rebuild()
 
+        self.pointerMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            self?.updatePointerTargets()
+        }
 
         // A collapsed panel has to refuse hit tests outside the cutout or it eats clicks on the
         // menu bar, and AppKit finds drag destinations by hit testing — so a dragged file never
@@ -241,6 +286,37 @@ final class NotchController {
             .store(in: &self.cancellables)
 
         self.observePeeks()
+        self.notifications.start()
+
+        self.notifications.$current
+            .receive(on: RunLoop.main)
+            .sink { [weak self] notification in
+                guard let self else { return }
+                guard let notification else {
+                    if self.transientPeek?.notificationID != nil {
+                        self.peekTask?.cancel()
+                        self.transientPeek = nil
+                        self.updateVisiblePeek()
+                    }
+                    return
+                }
+
+                self.peek(NotchState.Peek(
+                    title: notification.title,
+                    subtitle: notification.message.isEmpty ? notification.applicationName : notification.message,
+                    symbol: "bell.badge.fill",
+                    usesArtwork: false,
+                    notificationID: notification.id,
+                    icon: notification.icon
+                ), duration: 5000)
+            }
+            .store(in: &self.cancellables)
+
+        self.state.$peek
+            .combineLatest(self.state.$peekScreen)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in self?.updatePeekTargets() }
+            .store(in: &self.cancellables)
 
         Settings.shared.captureVisibilityChanged
             .receive(on: RunLoop.main)
@@ -265,6 +341,7 @@ final class NotchController {
                 for surface in self?.surfaces ?? [] {
                     surface.hover.expanded = NotchGeometry.displayID(of: surface.screen) == expandedScreen
                 }
+                self?.updatePointerTargets()
             }
             .store(in: &self.cancellables)
     }
@@ -274,19 +351,24 @@ final class NotchController {
         self.media.$track
             .receive(on: RunLoop.main)
             .sink { [weak self] track in
-                guard let self, let track else { return }
-                let key = "\(track.title)|\(track.artist)"
-                defer { self.lastTrackKey = key }
-
-                // First sample only seeds the baseline; announcing it would fire on every launch.
-                guard Settings.peekOnTrackChangeNow else { return }
-                guard let previous = self.lastTrackKey, previous != key, track.isPlaying else { return }
-                self.peek(NotchState.Peek(
-                    title: track.title,
-                    subtitle: track.artist,
-                    symbol: "music.note",
-                    usesArtwork: true
-                ))
+                guard let self else { return }
+                let musicPeek: NotchState.Peek?
+                if let track, track.isPlaying {
+                    musicPeek = NotchState.Peek(
+                        title: track.title,
+                        subtitle: track.artist,
+                        symbol: "music.note",
+                        usesArtwork: true
+                    )
+                } else {
+                    musicPeek = nil
+                }
+                guard self.musicPeek != musicPeek else {
+                    self.updateVisiblePeek()
+                    return
+                }
+                self.musicPeek = musicPeek
+                self.updateVisiblePeek()
             }
             .store(in: &self.cancellables)
 
@@ -294,15 +376,8 @@ final class NotchController {
             .receive(on: RunLoop.main)
             .sink { [weak self] battery in
                 guard let self, let battery else { return }
-                defer { self.lastCharging = battery.isCharging }
-
-                guard let previous = self.lastCharging, previous != battery.isCharging else { return }
-                self.peek(NotchState.Peek(
-                    title: battery.isCharging ? "Cargando" : "Sin cargador",
-                    subtitle: "\(battery.percent)%" + (battery.detail.map { " · \($0)" } ?? ""),
-                    symbol: battery.symbol,
-                    usesArtwork: false
-                ))
+                guard let event = self.batteryEvents.update(battery) else { return }
+                self.peek(.battery(battery, event: event), duration: 5000)
             }
             .store(in: &self.cancellables)
     }
@@ -330,23 +405,56 @@ final class NotchController {
     }
 
     private func peek(_ peek: NotchState.Peek, on screen: NSScreen? = nil, duration: Int = 2600) {
-        // Hovering wins: never yank the panel out from under a pointer that is already using it.
-        guard self.state.expandedScreen == nil else { return }
+        // Battery alerts wait for the user to close the panel instead of being lost on hover.
+        guard self.state.expandedScreen == nil else {
+            if peek.batteryStatus != nil { self.pendingBatteryPeek = peek }
+            return
+        }
+        guard screen != nil || self.preferredPeekScreen != nil else { return }
 
         self.peekTask?.cancel()
-        self.state.peekScreen = NotchGeometry.displayID(of: screen ?? NSScreen.main ?? NSScreen.screens[0])
-        self.state.peek = peek
+        self.transientPeek = peek
+        self.updateVisiblePeek(preferredScreen: screen)
         self.peekTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(duration))
             guard !Task.isCancelled else { return }
-            self?.state.peek = nil
+            self?.transientPeek = nil
+            self?.updateVisiblePeek()
         }
     }
 
+    private func updateVisiblePeek(preferredScreen: NSScreen? = nil) {
+        guard self.state.expandedScreen == nil else { return }
+        if let pending = self.pendingBatteryPeek {
+            self.pendingBatteryPeek = nil
+            self.peek(pending, duration: 5000)
+            return
+        }
+        guard let peek = self.transientPeek ?? self.musicPeek,
+              let screen = preferredScreen ?? self.preferredPeekScreen
+        else {
+            if self.state.peek != nil { self.state.peek = nil }
+            if self.state.peekScreen != nil { self.state.peekScreen = nil }
+            return
+        }
+        let screenID = NotchGeometry.displayID(of: screen)
+        if self.state.peekScreen != screenID { self.state.peekScreen = screenID }
+        if self.state.peek != peek { self.state.peek = peek }
+    }
+
+    private var preferredPeekScreen: NSScreen? {
+        if let main = NSScreen.main, NotchGeometry.hasNotch(main) { return main }
+        return NSScreen.screens.first(where: NotchGeometry.hasNotch) ?? NSScreen.main ?? NSScreen.screens.first
+    }
+
     private func rebuild() {
+        self.expandTask?.cancel()
+        self.expandTask = nil
+        self.collapseTask?.cancel()
         for surface in self.surfaces { surface.panel.orderOut(nil) }
         self.state.expandedScreen = nil
         self.surfaces = NSScreen.screens.map { self.makeSurface(for: $0) }
+        self.updateVisiblePeek()
     }
 
     private func makeSurface(for screen: NSScreen) -> Surface {
@@ -372,11 +480,13 @@ final class NotchController {
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.isMovable = false
+        panel.ignoresMouseEvents = true
+        panel.acceptsMouseMovedEvents = true
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.sharingType = Settings.hideFromCaptureNow ? .none : .readOnly
 
-        let container = HoverView(frame: NSRect(origin: .zero, size: size))
+        let container = HoverView(frame: NSRect(origin: .zero, size: size), expandedHeight: self.state.contentHeight)
         let trigger = NotchGeometry.trigger(on: screen)
         container.notchRect = NSRect(
             x: trigger.minX - frame.minX,
@@ -384,7 +494,6 @@ final class NotchController {
             width: trigger.width,
             height: trigger.height
         )
-        container.triggerScreenRect = trigger
         container.slack = NotchGeometry.slack(on: screen)
         container.onEnter = { [weak self] in self?.expand(on: screen) }
         container.onExit = { [weak self] in self?.scheduleCollapse() }
@@ -410,20 +519,60 @@ final class NotchController {
             sessions: self.sessions,
             notchHeight: anchor.height,
             notchWidth: anchor.width,
+            hasPhysicalNotch: NotchGeometry.hasNotch(screen),
             screenID: NotchGeometry.displayID(of: screen),
             onQuickAdd: { [weak self] in self?.onQuickAdd?() },
             onEditTask: { [weak self] task in self?.onEditTask?(task) },
             onOpenSettings: { [weak self] in self?.onOpenSettings?() },
+            onActivateNotification: { [weak self] id in self?.activateNotification(id: id) },
             onCollapse: { [weak self] in self?.collapse() }
         ))
+        hosting.safeAreaRegions = []
         hosting.frame = container.bounds
         hosting.autoresizingMask = [.width, .height]
         container.addSubview(hosting)
 
         panel.contentView = container
+        container.updatePointer(at: NSEvent.mouseLocation)
         panel.orderFrontRegardless()
 
         return Surface(panel: panel, hover: container, screen: screen)
+    }
+
+    private func updatePeekTargets() {
+        for surface in self.surfaces {
+            let id = NotchGeometry.displayID(of: surface.screen)
+            guard let peek = self.state.peek(on: id) else {
+                surface.hover.peekRect = .zero
+                continue
+            }
+            let anchor = NotchGeometry.anchor(on: surface.screen)
+            let layout = peek.layout(notchWidth: anchor.width, height: anchor.height)
+            surface.hover.peekRect = layout.frame.offsetBy(
+                dx: 0, dy: NotchState.windowHeight - anchor.height
+            )
+        }
+        self.updatePointerTargets()
+    }
+
+    private func updatePointerTargets() {
+        let point = NSEvent.mouseLocation
+        let target = self.surfaces.firstIndex { surface in
+            let frame = surface.panel.frame
+            return point.x >= frame.minX && point.x <= frame.maxX
+                && point.y >= frame.minY && point.y <= frame.maxY
+        }
+        // Exit the old display before entering the new one so it cannot cancel the new hover.
+        for (index, surface) in self.surfaces.enumerated() where index != target {
+            surface.hover.updatePointer(at: point)
+        }
+        if let target { self.surfaces[target].hover.updatePointer(at: point) }
+    }
+
+    private func activateNotification(id: String) {
+        guard let notification = self.notifications.current, notification.id == id else { return }
+        self.notifications.activate(notification)
+        self.collapse()
     }
 
     /// Brushing past the notch on the way to the menu bar should not open it, so opening waits
@@ -433,13 +582,17 @@ final class NotchController {
         let id = NotchGeometry.displayID(of: screen)
         guard self.state.expandedScreen != id, self.expandTask == nil else { return }
 
+        let delay = NSApp.currentSystemPresentationOptions.contains(.fullScreen)
+            ? max(Settings.shared.hoverDelay, 0.7)
+            : Settings.shared.hoverDelay
         self.expandTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Settings.shared.hoverDelay))
+            try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self else { return }
             self.expandTask = nil
             guard self.pointerIsOnTrigger(of: screen) else { return }
             self.peekTask?.cancel()
-            self.state.peek = nil
+            self.transientPeek = nil
+            if self.state.peekScreen != id { self.state.peek = nil }
             // Only the display holding the pointer opens; the others stay shut.
             self.state.expandedScreen = id
         }
@@ -459,9 +612,10 @@ final class NotchController {
         self.expandTask = nil
         self.collapseTask?.cancel()
         self.collapseTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(300))
+            try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
             self?.state.expandedScreen = nil
+            self?.updateVisiblePeek()
         }
     }
 }

@@ -22,7 +22,9 @@ final class Settings: ObservableObject {
         static let maxImageGB = "MaxImageGB"
         static let ingestDictations = "IngestDictations"
         static let useNotch = "UseNotch"
-        static let peekOnTrackChange = "PeekOnTrackChange"
+        static let autoArrangeWindows = "AutoArrangeWindows"
+        static let windowLayout = "WindowLayout"
+        static let showAppNotifications = "ShowAppNotifications"
         static let hideFromCapture = "HideFromCapture"
         static let hoverDelay = "HoverDelay"
         static let rememberLastTab = "RememberLastTab"
@@ -126,9 +128,16 @@ final class Settings: ObservableObject {
         didSet { self.defaults.set(self.useNotch, forKey: Key.useNotch) }
     }
 
-    /// Off by default: a song changes far too often for the notch to announce every one of them.
-    @Published var peekOnTrackChange: Bool {
-        didSet { self.defaults.set(self.peekOnTrackChange, forKey: Key.peekOnTrackChange) }
+    @Published var autoArrangeWindows: Bool {
+        didSet { self.defaults.set(self.autoArrangeWindows, forKey: Key.autoArrangeWindows) }
+    }
+
+    @Published var windowLayout: WindowLayout {
+        didSet { self.defaults.set(self.windowLayout.rawValue, forKey: Key.windowLayout) }
+    }
+
+    @Published var showAppNotifications: Bool {
+        didSet { self.defaults.set(self.showAppNotifications, forKey: Key.showAppNotifications) }
     }
 
     /// Excludes the windows from screen capture. The clipboard holds whatever you copied, secrets
@@ -190,7 +199,9 @@ final class Settings: ObservableObject {
         self.maxImageGB = self.defaults.object(forKey: Key.maxImageGB) as? Double ?? 2
         self.ingestDictations = self.defaults.object(forKey: Key.ingestDictations) as? Bool ?? true
         self.useNotch = self.defaults.object(forKey: Key.useNotch) as? Bool ?? true
-        self.peekOnTrackChange = self.defaults.object(forKey: Key.peekOnTrackChange) as? Bool ?? false
+        self.autoArrangeWindows = self.defaults.object(forKey: Key.autoArrangeWindows) as? Bool ?? false
+        self.windowLayout = self.defaults.string(forKey: Key.windowLayout).flatMap(WindowLayout.init(rawValue:)) ?? .grid
+        self.showAppNotifications = self.defaults.object(forKey: Key.showAppNotifications) as? Bool ?? true
         self.hideFromCapture = self.defaults.object(forKey: Key.hideFromCapture) as? Bool ?? true
         self.hoverDelay = self.defaults.object(forKey: Key.hoverDelay) as? Double ?? 0.16
         self.rememberLastTab = self.defaults.object(forKey: Key.rememberLastTab) as? Bool ?? true
@@ -203,8 +214,12 @@ final class Settings: ObservableObject {
         UserDefaults.standard.object(forKey: "IngestDictations") as? Bool ?? true
     }
 
-    nonisolated static var peekOnTrackChangeNow: Bool {
-        UserDefaults.standard.object(forKey: "PeekOnTrackChange") as? Bool ?? false
+    nonisolated static var autoArrangeWindowsNow: Bool {
+        UserDefaults.standard.object(forKey: "AutoArrangeWindows") as? Bool ?? false
+    }
+
+    nonisolated static var showAppNotificationsNow: Bool {
+        UserDefaults.standard.object(forKey: "ShowAppNotifications") as? Bool ?? true
     }
 
     nonisolated static var maxTextsNow: Int {

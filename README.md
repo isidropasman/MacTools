@@ -35,13 +35,17 @@ notice the next annoyance
 | --- | --- |
 | **Clipboard** | Watches clipboard changes, keeps useful history and lets me paste previous items quickly. |
 | **Calendar** | Pulls calendar context and meeting links into the workflow instead of making me hunt for them. |
-| **Battery** | Monitors battery state from inside the same utility surface. |
-| **Media** | Gives the app awareness and control of currently playing media. |
+| **Battery** | Compact charging, low battery (20%) and full charge alerts around the notch. |
+| **Media** | Controls Spotify, Music and YouTube videos already open in Chrome, with artwork and persistent playback beside the notch. |
 | **Voice ingest** | Accepts voice input as another fast path into the app. |
 | **Global hotkeys** | Makes the tools available without navigating through windows. |
 | **Quick Add** | Captures tasks quickly and turns lightweight text into actionable items. |
 | **Shelf** | Keeps temporary things close at hand instead of forcing them into permanent storage. |
 | **Notch UI** | Uses the physical MacBook notch area as part of the interaction surface. |
+| **App alerts** | Mirrors visible Notification Center alerts through Accessibility. |
+| **Window arrangement** | Optionally arranges visible windows in grids, columns or rows on each display. |
+
+Behavior, dimensions, permissions, implementation notes and validation limits are documented in [docs/notch.md](docs/notch.md).
 
 The point isn't that each feature is novel. The point is that I wanted them to work **together, exactly the way I use my Mac**.
 
@@ -50,7 +54,7 @@ The point isn't that each feature is novel. The point is that I wanted them to w
 MacTools is built in Swift and mixes SwiftUI with lower-level macOS APIs where the interaction requires it.
 
 ```text
-Sources/Pila/
+Sources/MacTools/
 ├── ClipboardWatcher.swift
 ├── HistoryModel.swift
 ├── CalendarManager.swift

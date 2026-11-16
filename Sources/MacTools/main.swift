@@ -18,7 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Closing the catalogue should put you back where you were, not just leave you with nothing.
     private var projectsCameFromQuickAdd = false
     private var media: MediaController?
+    private var browserMediaServer: BrowserMediaServer?
     private var notch: NotchController?
+    private var windowArranger: WindowArranger?
     private var shelf: ShelfStore?
     private var battery: BatteryMonitor?
     private var calendar: CalendarManager?
@@ -68,8 +70,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] in self?.registerHotKeys() }
             .store(in: &self.cancellables)
 
-        let media = MediaController()
+        let browserMedia = BrowserMediaStore()
+        let media = MediaController(browserMedia: browserMedia)
         media.start()
+        let browserMediaServer = BrowserMediaServer(store: browserMedia)
+        browserMediaServer.start()
+        self.browserMediaServer = browserMediaServer
         self.media = media
 
         let shelf = ShelfStore()
@@ -94,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The Chrome extension POSTs here; extensions cannot write files themselves.
         let fluid = FluidVoiceControl()
         self.fluid = fluid
-        let connectors = Connectors()
+        let connectors = Connectors(browserMedia: browserMedia)
         self.connectors = connectors
         self.setup = Setup(calendar: calendar, fluid: fluid, connectors: connectors)
 
@@ -118,6 +124,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         notch.install()
         self.notch = notch
+
+        let windowArranger = WindowArranger()
+        windowArranger.start()
+        self.windowArranger = windowArranger
 
         self.buildStatusItem()
         self.registerHotKeys()

@@ -46,13 +46,17 @@ struct NotchView: View {
     let notchHeight: CGFloat
     /// Width of the cutout, so the strip beside it can carry content instead of being padding.
     let notchWidth: CGFloat
+    let hasPhysicalNotch: Bool
     let screenID: CGDirectDisplayID
     let onQuickAdd: () -> Void
     let onEditTask: (TodoTask) -> Void
     let onOpenSettings: () -> Void
+    let onActivateNotification: (String) -> Void
     let onCollapse: () -> Void
 
     @ObservedObject private var settings = Settings.shared
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var tabNamespace
     /// Set while dragging the progress bar, so the bar follows the finger instead of the player.
     @State private var scrubFraction: Double?
@@ -61,74 +65,159 @@ struct NotchView: View {
 
     private var expanded: Bool { self.state.isExpanded(on: self.screenID) }
     private var isOpen: Bool { self.state.isOpen(on: self.screenID) }
+    private var peeking: Bool { self.state.peek(on: self.screenID) != nil && !self.expanded }
+    private var peekLayout: NotchPeekLayout {
+        NotchPeekLayout(
+            notchWidth: self.notchWidth, height: self.notchHeight,
+            leadingWidth: self.state.peek(on: self.screenID)?.leadingWidth ?? 0,
+            trailingWidth: self.state.peek(on: self.screenID)?.trailingWidth ?? 0,
+            containerWidth: NotchState.windowWidth
+        )
+    }
+    private var peekWidth: CGFloat { self.peekLayout.frame.width }
 
     /// Radii grow with the panel: tight like the real cutout when closed, wide when open.
     private var shape: NotchShape {
         NotchShape(
-            topRadius: self.isOpen ? 22 : 6,
-            bottomRadius: self.isOpen ? 26 : 14
+            topRadius: self.expanded ? 22 : 6,
+            bottomRadius: self.expanded ? 26 : (self.peeking ? 8 : 14)
         )
     }
 
     var body: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .top) {
-                // Nothing is drawn while closed. Painting the cutout black looked fine in theory,
-                // but the rounded shape never lines up with the real bezel and reads as a blob
-                // hanging off the menu bar.
-                // Flat black, not glass: the panel has to read as an extension of the bezel, and any
-                // material lightens it enough to look like a window stuck under the menu bar. The
-                // artwork's colour bleeds in from the left, which is the only thing that lifts it.
-                ZStack {
-                    Color.black
-                    if let tint = media.tint, self.state.tab == .home {
-                        RadialGradient(
-                            colors: [Color(nsColor: tint).opacity(0.42), .clear],
-                            center: UnitPoint(x: 0.12, y: 0.62),
-                            startRadius: 0,
-                            endRadius: NotchState.windowWidth * 0.62
-                        )
-                        .blur(radius: 34)
-                    }
-                }
-                .opacity(self.isOpen ? 1 : 0)
-                .animation(.easeInOut(duration: 0.5), value: self.media.tint)
-
-                // Always laid out at full width so nothing reflows mid-animation; the container
-                // clips it. Swapping views with if/else instead would pop, not grow.
+                // The hidden panel stays mounted, but it must not enlarge the peek container.
                 self.panelContent
-                    .frame(width: NotchState.windowWidth, height: self.state.contentHeight, alignment: .top)
+                    .frame(
+                        width: NotchState.windowWidth,
+                        height: self.state.contentHeight,
+                        alignment: .top
+                    )
                     .opacity(self.expanded ? 1 : 0)
-                    .animation(.easeOut(duration: 0.18).delay(self.expanded ? 0.08 : 0), value: self.expanded)
+                    .allowsHitTesting(self.expanded)
+                    .animation(.easeOut(duration: 0.12), value: self.expanded)
 
                 if let peek = state.peek(on: self.screenID), !self.expanded {
                     self.peekStrip(peek)
-                        .frame(width: NotchState.windowWidth, height: NotchState.peekHeight, alignment: .top)
+                        .frame(width: self.peekWidth, height: self.notchHeight, alignment: .center)
                         .transition(.opacity)
                 }
             }
             .frame(
-                width: self.isOpen ? NotchState.windowWidth : self.notchWidth,
-                height: self.isOpen ? self.state.currentHeight(on: self.screenID) : self.notchHeight,
+                width: self.expanded ? NotchState.windowWidth : (self.peeking ? self.peekWidth : self.notchWidth),
+                height: self.isOpen
+                    ? self.state.currentHeight(on: self.screenID, peekHeight: self.notchHeight)
+                    : self.notchHeight,
                 alignment: .top
             )
+            .background {
+                if self.isOpen {
+                    self.surfaceBackground
+                        .mask {
+                            GeometryReader { geometry in
+                                Path { path in
+                                    path.addRect(CGRect(origin: .zero, size: geometry.size))
+                                    if self.hasPhysicalNotch {
+                                        path.addRect(CGRect(
+                                            x: (geometry.size.width - self.notchWidth) / 2 - (self.peeking ? self.peekLayout.offset : 0),
+                                            y: 0, width: self.notchWidth, height: self.notchHeight
+                                        ))
+                                    }
+                                }
+                                .fill(style: FillStyle(eoFill: true))
+                            }
+                        }
+                        .allowsHitTesting(false)
+                }
+            }
             .clipShape(self.shape)
-            // No rim at all. What separates the panel from the desktop is the shadow under it,
-            // which is also what stops it from looking like a flat rectangle taped to the screen.
-            .shadow(color: .black.opacity(0.55), radius: 14, y: 5)
+            .shadow(
+                color: .black.opacity(self.peeking ? 0.06 : 0.22),
+                radius: self.peeking ? 3 : 10,
+                y: self.peeking ? 1 : 3
+            )
+            .overlay(alignment: .top) {
+                if !self.hasPhysicalNotch {
+                    Color.black
+                        .frame(width: self.notchWidth, height: self.notchHeight)
+                        .offset(x: self.peeking ? -self.peekLayout.offset : 0)
+                        .opacity(self.isOpen ? 1 : 0)
+                        .allowsHitTesting(false)
+                }
+            }
             .overlay(
                 self.shape
                     .stroke(.white.opacity(0.5), lineWidth: 1)
                     .opacity(self.isOpen && self.state.dropTargeted ? 1 : 0)
+                    .allowsHitTesting(false)
             )
+            .offset(x: self.peeking ? self.peekLayout.offset : 0)
             // The window never resizes; this is the only thing that moves.
-            .animation(.spring(response: 0.38, dampingFraction: 0.78), value: self.expanded)
-            .animation(.spring(response: 0.34, dampingFraction: 0.8), value: self.state.peek)
+            .animation(.spring(response: self.expanded ? 0.24 : 0.18, dampingFraction: 0.9), value: self.expanded)
+            .animation(.spring(response: self.expanded ? 0.24 : 0.18, dampingFraction: 0.9), value: self.state.peek)
             .animation(.spring(response: 0.3, dampingFraction: 0.85), value: self.state.tab)
 
             Spacer(minLength: 0)
         }
         .frame(width: NotchState.windowWidth, height: NotchState.windowHeight, alignment: .top)
+        .ignoresSafeArea()
+        .environment(\.colorScheme, .dark)
+        .transaction { transaction in
+            if self.reduceMotion { transaction.animation = nil }
+        }
+    }
+
+    private var surfaceBackground: some View {
+        ZStack {
+            Group {
+                if self.reduceTransparency {
+                    self.shape.fill(Color(white: 0.12))
+                } else if #available(macOS 26.0, *) {
+                    Color.clear.glassEffect(.regular, in: self.shape)
+                } else {
+                    self.shape.fill(.ultraThinMaterial)
+                }
+            }
+
+            if let tint = self.media.tint,
+               (self.expanded && self.state.tab == .home)
+                || (self.peeking && self.state.peek(on: self.screenID)?.usesArtwork == true) {
+                self.artworkGlow(tint)
+            }
+
+            self.shape.fill(
+                LinearGradient(
+                    colors: [
+                        Color(white: 0.055).opacity(0.78),
+                        Color(white: 0.09).opacity(0.72),
+                        Color(white: 0.035).opacity(0.80),
+                    ],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+            )
+        }
+        .animation(self.reduceMotion ? nil : .easeInOut(duration: 1.2), value: self.media.tint)
+    }
+
+    private func artworkGlow(_ tint: NSColor) -> some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 24, paused: self.reduceMotion || self.media.track?.isPlaying != true)) { context in
+            let phase = self.reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate * (.pi / 15)
+            GeometryReader { geometry in
+                ZStack {
+                    RadialGradient(
+                        colors: [Color(nsColor: tint).opacity(0.6), Color(nsColor: tint).opacity(0.18), .clear],
+                        center: UnitPoint(x: 0.2 + 0.1 * sin(phase), y: 0.35 + 0.15 * cos(phase)),
+                        startRadius: 0, endRadius: geometry.size.width * 0.58
+                    )
+                    RadialGradient(
+                        colors: [Color(nsColor: tint).opacity(0.34), .clear],
+                        center: UnitPoint(x: 0.82 + 0.08 * cos(phase * 0.8), y: 0.75 + 0.1 * sin(phase)),
+                        startRadius: 0, endRadius: geometry.size.width * 0.4
+                    )
+                }
+            }
+        }
     }
 
     private var panelContent: some View {
@@ -152,56 +241,127 @@ struct NotchView: View {
         .padding(.bottom, 12)
     }
 
-    /// Deliberately not the full panel: a peek is a glance, so it shows one line and leaves.
-    /// The cutout splits the strip in two, so both halves have to carry something — putting the
-    /// icon alone on the left wasted half the width and truncated the text on the right.
+    @ViewBuilder
     private func peekStrip(_ peek: NotchState.Peek) -> some View {
-        // Explicit halves: with flexible frames the greedy Text took the whole strip and truncated
-        // itself long before it ran out of room.
-        let half = max((NotchState.windowWidth - 32 - self.notchWidth) / 2, 60)
+        let layout = self.peekLayout
 
-        return HStack(spacing: 0) {
-            HStack(spacing: 7) {
-                Spacer(minLength: 0)
-
-                // Artwork earns its place on the left; a bare symbol just steals width from the
-                // title, so it rides with the subtitle on the other side instead.
-                if peek.usesArtwork, let artwork = media.artwork {
-                    Image(nsImage: artwork)
-                        .resizable()
-                        .frame(width: 24, height: 24)
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                }
-
-                Text(peek.title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+        let icon = Group {
+            if let battery = peek.batteryStatus {
+                BatteryPeekIcon(percent: battery.percent, tint: peek.tint)
+            } else if let icon = peek.icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 22, height: 22)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            } else if peek.usesArtwork, let artwork = media.artwork {
+                Image(nsImage: artwork)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFill()
+                    .frame(width: 18, height: 18)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            } else {
+                Image(systemName: peek.symbol)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(peek.tint)
+                    .frame(width: 18, height: 18)
             }
-            .frame(width: half - 10, alignment: .trailing)
-            .padding(.trailing, 10)
-
-            Color.clear.frame(width: self.notchWidth)
-
-            HStack(spacing: 5) {
-                if !peek.usesArtwork {
-                    Image(systemName: peek.symbol)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(peek.tint)
-                }
-                Text(peek.subtitle)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .frame(width: half - 10, alignment: .leading)
-            .padding(.leading, 10)
         }
-        .foregroundStyle(.white)
-        .frame(height: self.notchHeight + 26, alignment: .center)
-        .padding(.horizontal, 16)
-        .transition(.scale(scale: 0.9, anchor: .top).combined(with: .opacity))
+        .frame(width: peek.batteryStatus == nil ? 22 : 24, height: 22)
+        .accessibilityHidden(true)
+
+        let content = HStack(spacing: 0) {
+            Group {
+                if peek.usesArtwork {
+                    icon
+                        .padding(.leading, 8)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    icon
+                        .padding(.trailing, peek.batteryStatus == nil ? 14 : 12)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+            .frame(width: layout.leadingWidth, height: self.notchHeight)
+
+            Color.clear.frame(width: self.notchWidth, height: self.notchHeight)
+
+            Group {
+                if peek.usesArtwork, let track = self.media.track {
+                    self.compactPlaybackIndicator(track)
+                        .padding(.trailing, 8)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityLabel(Text(verbatim: "\(peek.title), \(peek.subtitle)"))
+                } else if peek.batteryStatus != nil {
+                    HStack(spacing: 6) {
+                        Text(peek.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white)
+                        Text(peek.subtitle)
+                            .font(.system(size: 10, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.leading, 12)
+                    .padding(.trailing, 16)
+                } else {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(peek.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Text(peek.subtitle)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .padding(.leading, 10)
+                    .padding(.trailing, 8)
+                }
+            }
+            .frame(width: layout.trailingWidth, height: self.notchHeight, alignment: .leading)
+        }
+        .frame(width: self.peekWidth, height: self.notchHeight)
+
+        if let notificationID = peek.notificationID {
+            Button { self.onActivateNotification(notificationID) } label: { content }
+                .buttonStyle(.plain)
+                .help("Abrir aviso")
+        } else {
+            content
+        }
+    }
+
+    @ViewBuilder
+    private func compactPlaybackIndicator(_ track: MediaController.Track) -> some View {
+        Group {
+            if track.isBuffering {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 12, weight: .medium))
+            } else if track.isPlaying {
+                TimelineView(.animation(minimumInterval: 1.0 / 15, paused: self.reduceMotion)) { context in
+                    let phase = self.reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate * 4.5
+                    HStack(alignment: .bottom, spacing: 2) {
+                        ForEach(0..<4) { index in
+                            Capsule()
+                                .frame(width: 2, height: 3 + 9 * (0.5 + 0.5 * sin(phase + Double(index) * 1.7)))
+                        }
+                    }
+                    .frame(width: 14, height: 14, alignment: .bottom)
+                }
+            } else {
+                Image(systemName: "pause.fill")
+                    .font(.system(size: 11, weight: .medium))
+            }
+        }
+        .foregroundStyle(.white.opacity(0.85))
+        .accessibilityElement(children: .ignore)
+        .accessibilityValue(track.isBuffering ? Text("Cargando reproducción") : (track.isPlaying ? Text("Reproduciendo") : Text("En pausa")))
     }
 
     // MARK: - Ears    // MARK: - Ears
@@ -249,7 +409,7 @@ struct NotchView: View {
                             .matchedGeometryEffect(id: "activeTab", in: self.tabNamespace)
                     }
                 }
-                .foregroundStyle(.white.opacity(active ? 0.95 : 0.45))
+                .foregroundStyle(.white.opacity(active ? 0.95 : 0.6))
                 .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
@@ -262,12 +422,12 @@ struct NotchView: View {
             HStack(spacing: 4) {
                 Text("\(battery.percent)%")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(battery.percent < 15 ? AnyShapeStyle(Color.red) : AnyShapeStyle(.white.opacity(0.65)))
+                    .foregroundStyle(battery.isLow ? Color.orange : Color.white.opacity(0.65))
                 Image(systemName: battery.symbol)
                     .font(.system(size: 11))
-                    .foregroundStyle(battery.isCharging || battery.isCharged
-                        ? AnyShapeStyle(Color.green)
-                        : AnyShapeStyle(.white.opacity(0.65)))
+                    .foregroundStyle(battery.isPluggedIn
+                        ? Color.green
+                        : (battery.isLow ? Color.orange : Color.white.opacity(0.65)))
             }
             .help(battery.detail ?? "Batería")
         }
@@ -381,10 +541,17 @@ struct NotchView: View {
                     Text(track.title)
                         .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
-                    Text(track.artist)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        if track.browserTarget != nil {
+                            Image(systemName: "play.rectangle.fill")
+                                .foregroundStyle(.red)
+                                .help("YouTube")
+                        }
+                        Text(track.artist)
+                            .lineLimit(1)
+                    }
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.72))
 
                     self.progress(track)
                         .frame(width: 130)
@@ -394,9 +561,13 @@ struct NotchView: View {
 
                     HStack(spacing: 14) {
                         self.control("backward.fill", size: 12) { self.media.previous() }
+                            .disabled(!track.canGoPrevious)
+                            .opacity(track.canGoPrevious ? 1 : 0.3)
                         self.control(track.isPlaying ? "pause.fill" : "play.fill", size: 13) { self.media.playPause() }
                             .background(Circle().fill(.white.opacity(0.14)))
                         self.control("forward.fill", size: 12) { self.media.next() }
+                            .disabled(!track.canGoNext)
+                            .opacity(track.canGoNext ? 1 : 0.3)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -415,68 +586,76 @@ struct NotchView: View {
 
     /// Redrawn locally between AppleScript samples so the bar advances smoothly, and draggable
     /// to seek. While scrubbing the bar follows the pointer and ignores the sampled position.
+    @ViewBuilder
     private func progress(_ track: MediaController.Track) -> some View {
-        TimelineView(.periodic(from: .now, by: 0.5)) { _ in
-            let live = track.duration > 0 ? min(1, max(0, self.media.elapsed / track.duration)) : 0
-            let fraction = self.scrubFraction ?? live
-            let scrubbing = self.scrubFraction != nil
+        if track.isLive {
+            HStack(spacing: 4) {
+                Circle().fill(.red).frame(width: 4, height: 4)
+                Text("EN VIVO").font(.system(size: 8, weight: .semibold))
+                Spacer()
+            }
+            .foregroundStyle(.white.opacity(0.65))
+            .frame(height: 26)
+        } else {
+            TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+                let live = track.duration > 0 ? min(1, max(0, self.media.elapsed / track.duration)) : 0
+                let fraction = self.scrubFraction ?? live
+                let scrubbing = self.scrubFraction != nil
 
-            VStack(spacing: 3) {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(.white.opacity(0.18))
-                            .frame(height: scrubbing ? 4 : 2)
-                        Capsule()
-                            .fill(self.media.tint.map { Color(nsColor: $0) } ?? .white.opacity(0.85))
-                            .frame(width: geometry.size.width * fraction, height: scrubbing ? 5 : 3)
-                        Circle()
-                            .fill(.white)
-                            .frame(width: scrubbing ? 10 : 0, height: scrubbing ? 10 : 0)
-                            .offset(x: geometry.size.width * fraction - (scrubbing ? 5 : 0))
-                    }
-                    .frame(maxHeight: .infinity)
-                    // The bar itself is 3pt tall; the grab area has to be finger-sized.
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                guard geometry.size.width > 0 else { return }
-                                withAnimation(.easeOut(duration: 0.1)) {
-                                    self.scrubFraction = min(1, max(0, value.location.x / geometry.size.width))
+                VStack(spacing: 3) {
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(.white.opacity(0.18))
+                                .frame(height: scrubbing ? 4 : 2)
+                            Capsule()
+                                .fill(self.media.tint.map { Color(nsColor: $0) } ?? .white.opacity(0.85))
+                                .frame(width: geometry.size.width * fraction, height: scrubbing ? 5 : 3)
+                            Circle()
+                                .fill(.white)
+                                .frame(width: scrubbing ? 10 : 0, height: scrubbing ? 10 : 0)
+                                .offset(x: geometry.size.width * fraction - (scrubbing ? 5 : 0))
+                        }
+                        .frame(maxHeight: .infinity)
+                        // The bar itself is 3pt tall; the grab area has to be finger-sized.
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { value in
+                                    guard geometry.size.width > 0, track.canSeek else { return }
+                                    withAnimation(.easeOut(duration: 0.1)) {
+                                        self.scrubFraction = min(1, max(0, value.location.x / geometry.size.width))
+                                    }
                                 }
-                            }
-                            .onEnded { value in
-                                guard geometry.size.width > 0, track.duration > 0 else { return }
-                                let target = min(1, max(0, value.location.x / geometry.size.width))
-                                self.media.seek(to: target * track.duration)
-                                withAnimation(.easeOut(duration: 0.12)) { self.scrubFraction = nil }
-                            }
-                    )
-                }
-                .frame(height: 8)
+                                .onEnded { value in
+                                    guard geometry.size.width > 0, track.duration > 0, track.canSeek else { return }
+                                    let target = min(1, max(0, value.location.x / geometry.size.width))
+                                    self.media.seek(to: target * track.duration)
+                                    withAnimation(.easeOut(duration: 0.12)) { self.scrubFraction = nil }
+                                }
+                        )
+                    }
+                    .frame(height: 8)
+                    .allowsHitTesting(track.canSeek && track.duration > 0)
 
-                HStack {
-                    Text(Self.clock(fraction * track.duration))
-                    Spacer()
-                    Text(Self.clock(track.duration))
+                    HStack {
+                        Text(MediaController.clock(fraction * track.duration))
+                        Spacer()
+                        Text(MediaController.clock(track.duration))
+                    }
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.72))
                 }
-                .font(.system(size: 8, weight: .medium))
-                .foregroundStyle(.white.opacity(0.4))
             }
         }
-    }
-
-    private static func clock(_ seconds: Double) -> String {
-        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
-        let total = Int(seconds)
-        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     private var artwork: some View {
         Group {
             if let image = media.artwork {
-                Image(nsImage: image).resizable()
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: self.media.track?.browserTarget == nil ? .fill : .fit)
             } else {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(.white.opacity(0.1))
@@ -484,6 +663,7 @@ struct NotchView: View {
             }
         }
         .frame(width: 112, height: 112)
+        .background(.black.opacity(0.4))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(alignment: .bottomTrailing) {
             if let icon = media.appIcon {
@@ -933,7 +1113,6 @@ struct NotchView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 8) {
                     self.toggleRow("Recordar la última pestaña", isOn: self.$settings.rememberLastTab)
-                    self.toggleRow("Avisar al cambiar de canción", isOn: self.$settings.peekOnTrackChange)
                     self.toggleRow("Ocultar de capturas de pantalla", isOn: self.$settings.hideFromCapture)
                     self.toggleRow("Guardar los dictados en el portapapeles", isOn: self.$settings.ingestDictations)
 
@@ -1033,9 +1212,12 @@ struct NotchView: View {
                     HStack(alignment: .top, spacing: 8) {
                         ForEach(self.shelf.items, id: \.path) { url in
                             ShelfChip(url: url, thumbnails: self.thumbnails) {
-                                self.shelf.remove(url)
-                                self.thumbnails.forget(url)
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
+                                    self.shelf.remove(url)
+                                    self.thumbnails.forget(url)
+                                }
                             }
+                            .transition(.scale(scale: 0.86).combined(with: .opacity))
                         }
                     }
                     .padding(.horizontal, 1)
@@ -1120,26 +1302,15 @@ private struct ShelfChip: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(.white.opacity(self.hovered ? 0.1 : 0))
         )
-        .overlay(alignment: .topTrailing) {
-            Button(action: self.onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .background(Circle().fill(.black.opacity(0.5)))
-            }
-            .buttonStyle(.plain)
-            .opacity(self.hovered ? 1 : 0)
+        .overlay {
+            ShelfDragSource(
+                url: self.url,
+                onDrop: self.onRemove,
+                onOpen: { NSWorkspace.shared.open(self.url) },
+                onRemove: self.onRemove,
+                onHover: { self.hovered = $0 }
+            )
         }
-        .onHover { self.hovered = $0 }
-        // Dragging out hands the real file to the destination app.
-        .onDrag { NSItemProvider(contentsOf: self.url) ?? NSItemProvider() }
-        .onTapGesture(count: 2) { NSWorkspace.shared.open(self.url) }
-        .contextMenu {
-            Button("Abrir") { NSWorkspace.shared.open(self.url) }
-            Button("Mostrar en Finder") { NSWorkspace.shared.activateFileViewerSelecting([self.url]) }
-            Divider()
-            Button("Quitar del estante", role: .destructive, action: self.onRemove)
-        }
-        .help(self.url.lastPathComponent + "  ·  doble clic abre, arrastralo afuera para copiarlo")
+        .help(self.url.lastPathComponent + "  ·  doble clic abre, clic derecho muestra opciones, arrastralo afuera para copiarlo")
     }
 }
