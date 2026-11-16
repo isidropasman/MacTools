@@ -83,6 +83,10 @@
 "Nada por delante" = "Nothing ahead";
 "Nada sonando" = "Nothing playing";
 "Necesita permiso de Accesibilidad" = "Needs Accessibility permission";
+"Mostrar avisos de otras apps" = "Show other apps' notifications";
+"Lee los avisos visibles de Notification Center con Accesibilidad. Al tocar una tarjeta, ejecuta la acción del aviso o abre la app." = "Reads visible Notification Center alerts with Accessibility. Clicking a card performs the alert's action or opens the app.";
+"Pegar del historial, ordenar ventanas y leer avisos de apps si lo activás." = "Paste from history, arrange windows, and read app alerts when enabled.";
+"Abrir aviso" = "Open notification";
 "No pude leer esa imagen. PNG, JPG, TIFF, HEIC y PDF andan; SVG no lo abre macOS." = "I could not read that image. PNG, JPG, TIFF, HEIC and PDF work; macOS does not open SVG.";
 "Nueva tarea" = "New task";
 "Ocultar" = "Hide";
@@ -290,3 +294,16 @@
 "conectores" = "connectors";
 "sesiones" = "sessions";
 "Terminal y navegador reportando." = "Terminal and browser reporting.";
+
+"Conectado" = "Connected";
+"Batería baja" = "Low battery";
+"Carga completa" = "Fully charged";
+"La notch avisa al conectar el cargador, con batería baja (20%) y al completar la carga." = "The notch alerts you when power is connected, the battery is low (20%), or charging is complete.";
+
+"Chrome: IA y YouTube" = "Chrome: AI and YouTube";
+"La extensión conecta sesiones de IA y controles de YouTube." = "The extension connects AI sessions and YouTube controls.";
+"EN VIVO" = "LIVE";
+"Reproduciendo" = "Playing";
+"En pausa" = "Paused";
+"Cargando reproducción" = "Buffering";
+"Abrí T3 Code para crear su base local." = "Open T3 Code to create its local database.";

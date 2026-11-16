@@ -61,7 +61,7 @@ final class Setup: ObservableObject {
             Step(
                 id: "accessibility",
                 title: String(localized: "Permitir Accesibilidad"),
-                detail: String(localized: "Para que pegue solo lo que elegís del historial."),
+                detail: String(localized: "Para pegar del historial, ordenar ventanas y leer avisos de apps si lo activás."),
                 symbol: "hand.raised.fill",
                 optional: false,
                 done: Paster.isTrusted,

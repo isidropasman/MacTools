@@ -475,7 +475,16 @@ struct SettingsView: View {
     private var notch: some View {
         SwiftUI.Section {
             Toggle("Recordar la última pestaña", isOn: self.$settings.rememberLastTab)
-            Toggle("Asomarse al cambiar de canción", isOn: self.$settings.peekOnTrackChange)
+            Toggle("Ordenar ventanas automáticamente", isOn: self.$settings.autoArrangeWindows)
+            Picker("Distribución", selection: self.$settings.windowLayout) {
+                ForEach(WindowLayout.allCases) { layout in
+                    Text(layout.title).tag(layout)
+                }
+            }
+            .disabled(!self.settings.autoArrangeWindows)
+            Text("Al abrir o cerrar ventanas, las organiza en cada pantalla. Requiere Accesibilidad.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             LabeledContent("Espera para abrir") {
                 HStack {
                     Slider(value: self.$settings.hoverDelay, in: 0.05 ... 0.6)
@@ -485,9 +494,23 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Text("La notch siempre avisa cuando enchufás o desenchufás el cargador.")
+            Text("La notch avisa al conectar el cargador, con batería baja (20%) y al completar la carga.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Toggle("Mostrar avisos de otras apps", isOn: self.$settings.showAppNotifications)
+            Text("Lee los avisos visibles de Notification Center con Accesibilidad. Al tocar una tarjeta, ejecuta la acción del aviso o abre la app.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if self.settings.showAppNotifications, !self.trusted {
+                HStack {
+                    Label("Necesita permiso de Accesibilidad", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                    Spacer()
+                    Button("Dar permiso") { Paster.requestPermission() }
+                        .controlSize(.small)
+                }
+            }
         }
     }
 
@@ -567,7 +590,7 @@ struct SettingsView: View {
 
             self.permissionRow(
                 "Accesibilidad",
-                detail: "Pegar automáticamente al elegir un item del historial.",
+                detail: "Pegar del historial, ordenar ventanas y leer avisos de apps si lo activás.",
                 symbol: "hand.raised",
                 state: self.trusted ? .ok("Concedido") : .missing("Sin permiso")
             ) {

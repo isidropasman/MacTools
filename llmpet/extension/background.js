@@ -1,3 +1,5 @@
+importScripts("youtube-background.js");
+
 const ENDPOINT = "http://127.0.0.1:7717/session";
 
 const SITES = {
@@ -71,7 +73,7 @@ async function sweep() {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (!sender.tab) return;
+  if (!sender.tab || (typeof msg?.type === "string" && msg.type.startsWith("notchbox-media-"))) return;
   reported.set(sender.tab.id, msg);
   post({
     ...msg,

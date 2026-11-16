@@ -53,16 +53,38 @@ enum NotchGeometry {
     }
 
     /// `NSRect.contains` excludes the max edge, and at the top of the screen the pointer clamps to
-    /// exactly that edge, so a strict containment test never matched. Anything above the trigger's
-    /// bottom edge and within its columns counts.
+    /// exactly that edge, so a strict containment test never matched. The top edge is inclusive;
+    /// points on a display above this one must stay outside the trigger.
     static func pointerIsOnNotch(_ pointer: NSPoint, trigger: NSRect, slack: CGFloat) -> Bool {
         pointer.x >= trigger.minX - slack
             && pointer.x <= trigger.maxX + slack
             && pointer.y >= trigger.minY - slack
+            && pointer.y <= trigger.maxY
     }
 
     /// A physical cutout forgives a few points; a synthetic one should not.
     static func slack(on screen: NSScreen) -> CGFloat {
         self.hasNotch(screen) ? 6 : 1
+    }
+}
+
+struct NotchPeekLayout {
+    let leadingWidth: CGFloat
+    let trailingWidth: CGFloat
+    let frame: CGRect
+
+    var offset: CGFloat { (self.trailingWidth - self.leadingWidth) / 2 }
+
+    init(notchWidth: CGFloat, height: CGFloat, leadingWidth: CGFloat, trailingWidth: CGFloat, containerWidth: CGFloat) {
+        let availableWing = max(0, (containerWidth - notchWidth) / 2)
+        self.leadingWidth = min(leadingWidth, availableWing)
+        self.trailingWidth = min(trailingWidth, availableWing)
+        // The camera stays fixed even when the two wings have different widths.
+        self.frame = CGRect(
+            x: (containerWidth - notchWidth) / 2 - self.leadingWidth,
+            y: 0,
+            width: notchWidth + self.leadingWidth + self.trailingWidth,
+            height: height
+        )
     }
 }

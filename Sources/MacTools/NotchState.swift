@@ -16,6 +16,78 @@ final class NotchState: ObservableObject {
         /// new artwork has not downloaded yet, so a snapshot shows the previous song's cover.
         let usesArtwork: Bool
         var tint: Color = .white
+        var notificationID: String? = nil
+        var icon: NSImage? = nil
+        var batteryStatus: BatteryMonitor.State? = nil
+
+        var leadingWidth: CGFloat {
+            if self.usesArtwork { return 36 }
+            return self.batteryStatus == nil ? 52 : 48
+        }
+
+        var trailingWidth: CGFloat {
+            if self.usesArtwork { return 36 }
+            let titleWidth = (self.title as NSString).size(withAttributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            ]).width
+            if self.batteryStatus != nil {
+                let percentWidth = (self.subtitle as NSString).size(withAttributes: [
+                    .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
+                ]).width
+                return ceil(titleWidth + percentWidth) + 6 + 28
+            }
+            let subtitleWidth = (self.subtitle as NSString).size(withAttributes: [
+                .font: NSFont.systemFont(ofSize: 9, weight: .medium),
+            ]).width
+            return ceil(max(titleWidth, subtitleWidth)) + 18
+        }
+
+        @MainActor
+        func layout(notchWidth: CGFloat, height: CGFloat) -> NotchPeekLayout {
+            NotchPeekLayout(
+                notchWidth: notchWidth, height: height,
+                leadingWidth: self.leadingWidth, trailingWidth: self.trailingWidth,
+                containerWidth: NotchState.windowWidth
+            )
+        }
+
+        static func battery(_ state: BatteryMonitor.State, event: BatteryMonitor.Event? = nil) -> Self {
+            let event = event ?? (state.isFull ? .full : (state.isPluggedIn ? .connected : (state.isLow ? .low : .disconnected)))
+            let title: String
+            let tint: Color
+            switch event {
+            case .connected:
+                title = state.isCharging ? String(localized: "Cargando") : String(localized: "Conectado")
+                tint = .green
+            case .disconnected:
+                title = String(localized: "Sin cargador")
+                tint = .white
+            case .low:
+                title = String(localized: "Batería baja")
+                tint = .orange
+            case .full:
+                title = String(localized: "Carga completa")
+                tint = .green
+            }
+            return Self(
+                title: title,
+                subtitle: "\(state.percent)%",
+                symbol: state.outlineSymbol,
+                usesArtwork: false,
+                tint: tint,
+                batteryStatus: state
+            )
+        }
+
+        static func == (lhs: Peek, rhs: Peek) -> Bool {
+            lhs.title == rhs.title
+                && lhs.subtitle == rhs.subtitle
+                && lhs.symbol == rhs.symbol
+                && lhs.usesArtwork == rhs.usesArtwork
+                && lhs.tint == rhs.tint
+                && lhs.notificationID == rhs.notificationID
+                && lhs.batteryStatus == rhs.batteryStatus
+        }
     }
 
     @Published var tab: NotchTab = Settings.shared.rememberLastTab
@@ -39,16 +111,15 @@ final class NotchState: ObservableObject {
         self.isExpanded(on: screen) || self.peek(on: screen) != nil
     }
 
-    func currentHeight(on screen: CGDirectDisplayID) -> CGFloat {
+    func currentHeight(on screen: CGDirectDisplayID, peekHeight: CGFloat) -> CGFloat {
         if self.isExpanded(on: screen) { return self.contentHeight }
-        return self.peek(on: screen) != nil ? Self.peekHeight : 0
+        return self.peek(on: screen) != nil ? peekHeight : 0
     }
 
     /// One height for every tab. Growing and shrinking as you move between them made the panel
     /// feel like it was breathing at you.
     var contentHeight: CGFloat { 178 }
 
-    static let peekHeight: CGFloat = 66
     /// The window is fixed at this size and never resized; only the content inside it grows.
     static let windowHeight: CGFloat = 190
     static let windowWidth: CGFloat = 520

@@ -2,7 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 
 /// Sends a synthetic Cmd+V to whatever app the user came from.
-/// This is the one feature that needs Accessibility; everything else in MacTools works without it.
+/// Accessibility is also used by window arrangement and optional notification reading.
 enum Paster {
     static var isTrusted: Bool { AXIsProcessTrusted() }
 

@@ -240,7 +240,7 @@ struct FileSource: SessionSource {
 final class SessionStore: ObservableObject {
     @Published private(set) var sessions: [LLMSession] = []
 
-    private let sources: [SessionSource] = [ConductorSource(), FileSource(), ClaudeDesktopSource()]
+    private let sources: [SessionSource] = [ConductorSource(), FileSource(), ClaudeDesktopSource(), T3SessionSource()]
     private var timer: Timer?
 
     var readyCount: Int { visible.filter { $0.state == .ready }.count }
@@ -341,6 +341,11 @@ final class SessionStore: ObservableObject {
     func open(_ session: LLMSession) {
         if session.source == "chrome" {
             focusBrowserTab(session)
+            return
+        }
+        if session.source == "t3code" {
+            if let raw = session.openURL, let url = URL(string: raw) { NSWorkspace.shared.open(url) }
+            activateViaAppleEvent(bundleID: T3SessionSource.bundleID)
             return
         }
         guard let raw = session.openURL, let url = URL(string: raw) else { return }
